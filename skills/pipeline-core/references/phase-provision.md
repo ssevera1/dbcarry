@@ -11,7 +11,7 @@ send the user to /db-drift:plan).
    `python -c "import sys; sys.path.insert(0, r'<plugin>/scripts');
    from db_drift import pg;
    pg.run_sql({'host':'127.0.0.1','port':55433,'dbname':'postgres',
-   'user':'postgres','password_env':None}, 'CREATE DATABASE \"retail\"')"`
+   'user':'postgres','password_env':None}, 'CREATE DATABASE \"<dbname>\"')"`
    and likewise for each role DO-block from the provider skill.
 3. Write artifacts/target.json:
    {"provider": ..., "host": ..., "port": ..., "dbname": ...,
