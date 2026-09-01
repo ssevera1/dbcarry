@@ -99,15 +99,19 @@ def create(name, port, wal_level):
         raise pg.PgError(f"instance {name} already exists at {inst}")
     data = inst / "data"
     data.parent.mkdir(parents=True, exist_ok=True)
-    _run([pg.find_bin("initdb"), "-D", str(data), "-U", "postgres",
-          "-A", "trust", "-E", "UTF8", "--locale=C"])
-    with (data / "postgresql.conf").open("a", encoding="utf-8") as fh:
-        fh.write(f"\n# db-drift\nport = {port}\n"
-                 "listen_addresses = '127.0.0.1'\n"
-                 f"wal_level = {wal_level}\n")
-    (inst / "meta.json").write_text(
-        json.dumps({"port": port, "wal_level": wal_level}, indent=2),
-        encoding="utf-8")
+    try:
+        _run([pg.find_bin("initdb"), "-D", str(data), "-U", "postgres",
+              "-A", "trust", "-E", "UTF8", "--locale=C"])
+        with (data / "postgresql.conf").open("a", encoding="utf-8") as fh:
+            fh.write(f"\n# db-drift\nport = {port}\n"
+                     "listen_addresses = '127.0.0.1'\n"
+                     f"wal_level = {wal_level}\n")
+        (inst / "meta.json").write_text(
+            json.dumps({"port": port, "wal_level": wal_level}, indent=2),
+            encoding="utf-8")
+    except Exception:
+        shutil.rmtree(inst, ignore_errors=True)
+        raise
     print(f"created {name} (port {port}, wal_level {wal_level})")
     return 0
 
@@ -129,7 +133,8 @@ def start(name):
     ready = [pg.find_bin("pg_isready"), "-h", "127.0.0.1",
              "-p", str(meta["port"])]
     for _ in range(30):
-        if subprocess.run(ready, capture_output=True).returncode == 0:
+        if subprocess.run(ready, capture_output=True, text=True,
+                          encoding="utf-8").returncode == 0:
             print(f"started {name} on 127.0.0.1:{meta['port']}")
             return 0
         time.sleep(1)
@@ -148,7 +153,7 @@ def status(name):
     meta = _meta(name)
     ready = subprocess.run(
         [pg.find_bin("pg_isready"), "-h", "127.0.0.1", "-p", str(meta["port"])],
-        capture_output=True)
+        capture_output=True, text=True, encoding="utf-8")
     print(json.dumps({"name": name, "port": meta["port"],
                       "wal_level": meta["wal_level"],
                       "running": ready.returncode == 0}))
@@ -163,7 +168,7 @@ def destroy(name, yes):
             f"instance {name} and its data directory")
     ready = subprocess.run(
         [pg.find_bin("pg_isready"), "-h", "127.0.0.1", "-p", str(meta["port"])],
-        capture_output=True)
+        capture_output=True, text=True, encoding="utf-8")
     if ready.returncode == 0:
         raise pg.PgError(f"{name} is running; stop it first")
     shutil.rmtree(_inst(name))
