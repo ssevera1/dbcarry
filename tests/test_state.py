@@ -101,10 +101,29 @@ def test_verify_catches_corruption():
     st["phases"]["provision"]["status"] = "complete"  # illegal hand edit
     st["phases"]["provision"]["completed_at"] = "2026-09-01T00:00:00+00:00"
     problems = sm.verify_state(st)
-    assert problems  # out of order: provision complete without gate approval
+    assert problems  # phase complete without ever being started
     st2 = fresh()
     st2["phases"]["plan"]["status"] = "bogus"
     assert sm.verify_state(st2)
+
+
+def test_verify_catches_gate_bypass():
+    st = fresh()
+    sm.apply_start(st, "assess")
+    sm.apply_complete(st, "assess")
+    sm.apply_start(st, "plan")
+    sm.apply_set_strategy(st, "dump_restore")
+    sm.apply_complete(st, "plan")
+    # At this point plan is complete, but plan_approval is NOT approved
+    # (we manually avoided the auto-approval that complete_through does)
+    assert not st["gates"]["plan_approval"]["approved"]
+    # Manually set provision to in_progress with a timestamp (bypassing gate check)
+    st["phases"]["provision"]["status"] = "in_progress"
+    st["phases"]["provision"]["started_at"] = "2026-09-01T00:00:00+00:00"
+    problems = sm.verify_state(st)
+    # Should detect that provision progressed without plan_approval gate
+    assert problems
+    assert any("plan_approval" in p for p in problems)
 
 
 def test_verify_clean_state_is_empty():
