@@ -53,6 +53,12 @@ def _bool(cell):
     return cell == "t"
 
 
+def quote_ident(schema, name):
+    esc_schema = schema.replace('"', '""')
+    esc_name = name.replace('"', '""')
+    return f'"{esc_schema}"."{esc_name}"'
+
+
 def build_inventory(raw):
     server = raw["server"][0]
     return {
@@ -99,9 +105,9 @@ def main(argv):
         inv = build_inventory(raw)
         if args.exact:
             for table in inv["tables"]:
+                qualified = quote_ident(table["schema"], table["name"])
                 exact = pg.query_rows(
-                    ci, f'SELECT count(*) FROM "{table["schema"]}"'
-                        f'."{table["name"]}"', readonly=True)
+                    ci, f"SELECT count(*) FROM {qualified}", readonly=True)
                 table["rows"] = int(exact[0][0])
         text = json.dumps(inv, indent=2)
         if args.out:

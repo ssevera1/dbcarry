@@ -1,4 +1,4 @@
-from db_drift.inventory import build_inventory
+from db_drift.inventory import build_inventory, quote_ident
 
 RAW = {
     "server": [["17.5", "replica", "UTF8"]],
@@ -40,3 +40,7 @@ def test_sequences_and_roles():
     assert roles["reporting"]["can_login"] is False
     assert inv["views"] == ["public.recent_orders"]
     assert inv["matviews"] == ["public.sales_by_product"]
+
+
+def test_exact_identifier_quoting():
+    assert quote_ident("public", 'we"ird') == '"public"."we""ird"'
