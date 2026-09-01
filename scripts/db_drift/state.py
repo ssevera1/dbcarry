@@ -116,6 +116,12 @@ def apply_set_strategy(state, strategy):
     state["strategy"] = strategy
 
 
+def apply_mark_rollback(state, reason):
+    if state["rollback"]["performed"]:
+        raise StateError("rollback already recorded")
+    state["rollback"] = {"performed": True, "at": now(), "reason": reason}
+
+
 def verify_state(state):
     problems = []
     for key in ("migration", "engine", "provider", "phases", "gates"):
@@ -207,6 +213,8 @@ def main(argv):
     p.add_argument("--reason", required=True)
     p = sub.add_parser("set-strategy")
     p.add_argument("--strategy", required=True, choices=list(STRATEGIES))
+    p = sub.add_parser("mark-rollback")
+    p.add_argument("--reason", required=True)
     sub.add_parser("verify")
     sub.add_parser("show")
 
@@ -250,6 +258,9 @@ def main(argv):
         elif args.verb == "set-strategy":
             apply_set_strategy(state, args.strategy)
             log_decision(root, name, f"strategy={args.strategy}")
+        elif args.verb == "mark-rollback":
+            apply_mark_rollback(state, args.reason)
+            log_decision(root, name, f"ROLLBACK | {args.reason}")
         elif args.verb == "verify":
             problems = verify_state(state)
             if problems:

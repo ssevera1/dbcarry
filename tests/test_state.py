@@ -129,3 +129,12 @@ def test_verify_catches_gate_bypass():
 def test_verify_clean_state_is_empty():
     assert sm.verify_state(fresh()) == []
     assert sm.verify_state(complete_through(fresh(), "cutover")) == []
+
+
+def test_mark_rollback():
+    st = complete_through(fresh(), "provision")
+    sm.apply_mark_rollback(st, "validation failed twice")
+    assert st["rollback"]["performed"] is True
+    assert st["rollback"]["reason"] == "validation failed twice"
+    with pytest.raises(sm.StateError, match="already"):
+        sm.apply_mark_rollback(st, "again")
