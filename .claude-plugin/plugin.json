@@ -1,0 +1,5 @@
+{
+  "name": "db-drift",
+  "version": "0.1.0",
+  "description": "Agentic on-prem to cloud database migration pipeline with human approval gates"
+}
