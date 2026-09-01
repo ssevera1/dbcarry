@@ -6,9 +6,11 @@ source is internally consistent.
 """
 import argparse
 import csv
+import datetime
 import io
 import json
 import random
+import re
 import subprocess
 import sys
 
@@ -122,10 +124,12 @@ def gen_products(rng):
 
 
 def gen_orders(rng):
+    base = datetime.date(2025, 1, 1)
     for i in range(1, N_ORDERS + 1):
         day = rng.randint(0, 600)
+        ordered_at = base + datetime.timedelta(days=day)
         yield (i, rng.randint(1, N_CUSTOMERS), rng.choice(STATUSES),
-               f"2025-01-01T00:00:00+00:00")
+               f"{ordered_at.isoformat()}T00:00:00+00:00")
 
 
 def gen_order_items(rng):
@@ -150,6 +154,10 @@ def main(argv):
     ci = pg.conn_from_args(args)
     admin = dict(ci, dbname="postgres")
     try:
+        if not re.match(r"^[a-z_][a-z0-9_]*$", ci["dbname"]):
+            raise pg.PgError(
+                f"invalid dbname {ci['dbname']!r}: must match "
+                "^[a-z_][a-z0-9_]*$")
         exists = pg.query_rows(
             admin, f"SELECT 1 FROM pg_database WHERE datname='{ci['dbname']}'")
         if exists:
