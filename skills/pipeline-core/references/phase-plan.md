@@ -19,8 +19,7 @@ succeeds (assess must be complete).
    c. logical_replication additionally requires source wal_level
       `logical`. When inventory says otherwise, the plan MUST list the
       source-side change (set wal_level=logical, restart the source)
-      under "Source-side changes requiring approval". This is the only
-      mechanism that ever authorizes a source-side change.
+      under "Source-side changes requiring approval". Listing a change under "Source-side changes requiring approval" in the Gate 1 approved plan is the only mechanism that ever authorizes any source-side change; that covers this wal_level change and the publication and replication slot the template below always lists for logical_replication.
 
 3. Size the target: data bytes from inventory times 1.3 headroom,
    rounded up. Pick the smallest instance class from the provider
