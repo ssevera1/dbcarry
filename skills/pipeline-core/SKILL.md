@@ -24,8 +24,9 @@ the user this plainly if they configure mysql.
    (PGOPTIONS default_transaction_read_only). The only exceptions, each
    allowed only when the approved plan explicitly lists it: creating a
    publication and replication slot (logical_replication strategy),
-   quiescing writes at cutover in demo mode, and reverting that quiesce
-   during a rollback.
+   quiescing writes at cutover in demo mode, reverting that quiesce
+   during a rollback, and dropping the publication and slot once
+   replication is no longer needed (at cutover or during rollback).
 3. Secrets: only env var NAMES appear in migration.yaml, artifacts, and
    output. Never echo passwords or full connection URLs.
 4. Gates run in the main session, never in a subagent. Record outcomes

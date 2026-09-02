@@ -66,12 +66,12 @@ def drop_subscription(ci, name):
 
 
 def drop_publication(ci, name):
-    pg.run_sql(ci, f'DROP PUBLICATION IF EXISTS "{name}"')
+    pg.run_sql(ci, f'DROP PUBLICATION IF EXISTS "{name}"', writable=True)
     slots = pg.query_rows(
         ci, "SELECT slot_name FROM pg_replication_slots "
             "WHERE NOT active AND slot_name LIKE 'dbdrift%'")
     for (slot,) in slots:
-        pg.run_sql(ci, f"SELECT pg_drop_replication_slot('{slot}')")
+        pg.run_sql(ci, f"SELECT pg_drop_replication_slot('{slot}')", writable=True)
         print(f"dropped orphan slot {slot}")
     print(f"dropped publication {name}")
     return 0

@@ -13,6 +13,7 @@ from pathlib import Path
 TOOLS_ROOT = Path(os.environ.get("DBDRIFT_HOME", str(Path.home() / ".db-drift")))
 PORTABLE_BIN = TOOLS_ROOT / "pg" / "pgsql" / "bin"
 READONLY_OPTS = "-c default_transaction_read_only=on"
+WRITABLE_OPTS = "-c default_transaction_read_only=off"
 
 
 class PgError(Exception):
@@ -50,11 +51,13 @@ def conn_from_args(args, prefix=""):
             "user": get("user"), "password_env": get("password_env")}
 
 
-def build_env(ci, readonly=False):
+def build_env(ci, readonly=False, writable=False):
     env = dict(os.environ)
     env["PGCLIENTENCODING"] = "UTF8"
     env.pop("PGOPTIONS", None)
-    if readonly:
+    if writable:
+        env["PGOPTIONS"] = WRITABLE_OPTS
+    elif readonly:
         env["PGOPTIONS"] = READONLY_OPTS
     password_env = ci.get("password_env")
     if password_env and password_env in os.environ:
@@ -67,9 +70,9 @@ def conn_argv(ci):
             "-U", ci["user"], "-d", ci["dbname"]]
 
 
-def run_tool(argv, ci, readonly=False):
+def run_tool(argv, ci, readonly=False, writable=False):
     """Run a pg tool (psql, pg_dump, ...) with connection env prepared."""
-    proc = subprocess.run(argv, env=build_env(ci, readonly),
+    proc = subprocess.run(argv, env=build_env(ci, readonly, writable),
                           capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         tool = Path(argv[0]).stem
@@ -78,12 +81,12 @@ def run_tool(argv, ci, readonly=False):
     return proc
 
 
-def run_sql(ci, sql, readonly=False):
+def run_sql(ci, sql, readonly=False, writable=False):
     argv = [find_bin("psql"), "-X", "-q", "-v", "ON_ERROR_STOP=1",
             "-A", "-t", "-F", "\t"] + conn_argv(ci) + ["-c", sql]
-    return run_tool(argv, ci, readonly).stdout
+    return run_tool(argv, ci, readonly, writable).stdout
 
 
-def query_rows(ci, sql, readonly=False):
-    out = run_sql(ci, sql, readonly)
+def query_rows(ci, sql, readonly=False, writable=False):
+    out = run_sql(ci, sql, readonly, writable)
     return [line.split("\t") for line in out.splitlines() if line]

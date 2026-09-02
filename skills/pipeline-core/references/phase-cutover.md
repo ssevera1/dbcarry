@@ -16,7 +16,10 @@ until the gate is approved).
       and terminates idle writer sessions. Real source: the OPERATOR
       stops application writes; the pipeline waits for confirmation.
    2. Final sync. logical_replication: wait for zero replication lag
-      (replicate wait-synced), then DROP SUBSCRIPTION on the target.
+      (replicate wait-synced), then DROP SUBSCRIPTION on the target,
+      then DROP PUBLICATION dbdrift_pub on the source (this listed
+      source-side change's cleanup is equally authorized as its
+      creation was under Gate 1).
       dump_restore: fresh row counts both sides; on drift, reload data
       inside this downtime window (see Drift handling).
    3. Bump target sequences: for each source sequence, on the target
@@ -55,6 +58,10 @@ until the gate is approved).
    hard rule 2). Terminate sessions:
    SELECT pg_terminate_backend(pid) FROM pg_stat_activity
    WHERE datname = '<db>' AND pid <> pg_backend_pid().
+   For logical_replication strategy only, after dropping the subscription
+   on the target, drop the publication on the source with:
+   `python "$SCRIPTS" replicate drop-publication <source flags> --name dbdrift_pub`
+   (dump_restore strategy has no publication to drop).
 4. All steps green -> `state complete-phase --phase cutover`. Report:
    the migration is complete, where the target lives (target.json),
    and that /db-drift:rollback remains available for the back-out path.
