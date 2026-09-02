@@ -66,6 +66,19 @@ migration name. Permanent.
 Standard_B1ms runs on the order of $0.02/hour plus storage (verify
 current pricing). State the estimate in the plan and provision report.
 
+## Known limitations
+
+Azure Database for PostgreSQL Flexible Server creates its own
+`azure_sys` schema, with its own tables, in every database. `inventory`,
+`objcount`, and `checksum snapshot` filter out only `pg_catalog` and
+`information_schema`; they do not currently filter `azure_sys`. Under
+phase-schema.md's equal-count requirement, this means a real migration
+against this provider will show the target with one extra schema's
+worth of tables that the source never had. An operator should expect to
+manually account for this discrepancy in the schema and data
+equal-count checks (a future `--exclude-schema` flag is the real fix;
+not in scope for v0.1.0).
+
 ## MySQL flavor (engine mysql; execution deferred in v1)
 
 Azure Database for MySQL Flexible Server exists with the same

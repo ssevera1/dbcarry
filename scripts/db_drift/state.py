@@ -279,6 +279,9 @@ def main(argv):
     except StateError as exc:
         print(f"STATE ERROR: {exc}", file=sys.stderr)
         return 1
+    except (OSError, ValueError, KeyError, IndexError) as exc:
+        print(f"STATE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ the report).
    - Real source: show the operator the required change, wait for their
      confirmation, re-verify.
 2. `python "$SCRIPTS" replicate create-publication <source flags>`
-   (the one approved source write).
+   (an approved source write).
 3. `python "$SCRIPTS" replicate create-subscription <target flags>
    --source-host <h> --source-port <p> --source-dbname <d>
    --source-user <u>`

@@ -3,6 +3,18 @@
 Preconditions: `state verify` passes; `state start-phase --phase plan`
 succeeds (assess must be complete).
 
+Resuming after interruption: if `state start-phase --phase plan` fails
+because plan is already complete, this is not necessarily an error. Run
+`state show` and check `plan_approval`. If it is still unapproved, the
+prior session completed step 4 (writing 02-plan.md and calling `state
+complete-phase --phase plan`) but was interrupted before step 5's
+`state approve-gate` ran, so the gate is stranded rather than the phase
+being genuinely done. Skip straight to step 5 (GATE 1), re-presenting
+the existing artifacts/02-plan.md verbatim, rather than treating the
+start-phase failure as a hard stop. If plan_approval is already
+approved, the phase is genuinely done; report that and move on to
+provision.
+
 1. Read artifacts/01-assessment.md, artifacts/inventory.json, and
    migration.yaml.
 

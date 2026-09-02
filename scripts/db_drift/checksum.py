@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 
-from db_drift import pg
+from db_drift import inventory, pg
 
 SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema')"
 TABLES_SQL = (
@@ -27,7 +27,7 @@ CHECKSUM_SQL = (
 def take_snapshot(ci):
     snapshot = {"tables": {}, "sequences": {}}
     for schema, name in pg.query_rows(ci, TABLES_SQL, readonly=True):
-        qualified = f'"{schema}"."{name}"'
+        qualified = inventory.quote_ident(schema, name)
         row = pg.query_rows(ci, CHECKSUM_SQL.format(table=qualified),
                             readonly=True)[0]
         snapshot["tables"][f"{schema}.{name}"] = {
@@ -84,6 +84,9 @@ def main(argv):
         return 0 if report["match"] else 1
     except pg.PgError as exc:
         print(f"CHECKSUM ERROR: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError, IndexError) as exc:
+        print(f"CHECKSUM ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

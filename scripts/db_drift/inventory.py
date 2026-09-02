@@ -120,6 +120,9 @@ def main(argv):
     except pg.PgError as exc:
         print(f"INVENTORY ERROR: {exc}", file=sys.stderr)
         return 1
+    except (OSError, ValueError, KeyError, IndexError) as exc:
+        print(f"INVENTORY ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

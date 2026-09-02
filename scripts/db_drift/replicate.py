@@ -69,7 +69,7 @@ def drop_publication(ci, name):
     pg.run_sql(ci, f'DROP PUBLICATION IF EXISTS "{name}"', writable=True)
     slots = pg.query_rows(
         ci, "SELECT slot_name FROM pg_replication_slots "
-            "WHERE NOT active AND slot_name LIKE 'dbdrift%'")
+            "WHERE NOT active AND slot_name LIKE 'dbdrift%'", readonly=True)
     for (slot,) in slots:
         pg.run_sql(ci, f"SELECT pg_drop_replication_slot('{slot}')", writable=True)
         print(f"dropped orphan slot {slot}")
@@ -124,6 +124,9 @@ def main(argv):
             return drop_publication(ci, args.name)
     except pg.PgError as exc:
         print(f"REPLICATE ERROR: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError, KeyError, IndexError) as exc:
+        print(f"REPLICATE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

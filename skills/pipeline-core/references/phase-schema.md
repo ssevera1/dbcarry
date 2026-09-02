@@ -13,7 +13,11 @@ conn). Build source flags and target flags for the scripts from them.
 3. `python "$SCRIPTS" objcount <source flags>` and again with target
    flags. Compare: tables, views, matviews, sequences MUST be equal.
    indexes and constraints are expected to differ here (they arrive
-   with post-data during migrate-data); record both values.
+   with post-data during migrate-data); record both values. Note: some
+   cloud provider targets add their own schemas or objects that are not
+   migration drift (Azure's `azure_sys`, for example); consult the
+   target provider's SKILL.md "Known limitations" section before
+   treating a count mismatch as a failure.
 4. Write artifacts/04-schema-report.md: timing records, both objcount
    JSON lines, the equal/deferred comparison verdict, and any restore
    warnings verbatim.

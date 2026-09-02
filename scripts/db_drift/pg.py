@@ -3,7 +3,10 @@
 Secrets policy: passwords come from env vars named by password_env and are
 passed to child processes via PGPASSWORD. Nothing here ever prints a
 password or a full connection URL. Source sessions are forced read-only
-via PGOPTIONS.
+via PGOPTIONS. A writable override (writable=True) is also available: the
+cutover phase needs to make one specific, plan-approved write, dropping
+the publication, even after the source database itself has been set to
+default_transaction_read_only = on.
 """
 import os
 import shutil

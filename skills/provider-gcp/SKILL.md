@@ -70,6 +70,17 @@ data permanently.
 db-g1-small runs on the order of $0.05/hour plus storage (verify
 current pricing). State the estimate in the plan and provision report.
 
+## Known limitations
+
+Managed Cloud SQL instances may add their own schemas or objects beyond
+what the source ever had. `inventory`, `objcount`, and `checksum
+snapshot` filter out only `pg_catalog` and `information_schema`; they do
+not currently filter Cloud SQL's own additions. An operator running a
+real migration against this provider should expect to manually account
+for any resulting discrepancy in the schema and data equal-count checks
+(a future `--exclude-schema` flag is the real fix; not in scope for
+v0.1.0).
+
 ## MySQL flavor (engine mysql; execution deferred in v1)
 
 Cloud SQL for MySQL exists with the same provisioning shape

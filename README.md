@@ -51,7 +51,7 @@ by hand.
 ## Quickstart
 
 ```
-# install the plugin, then from the plugin root:
+# install the plugin, then from your project directory:
 /db-drift:demo setup
 /db-drift:init demo-run
 /db-drift:autopilot
@@ -90,8 +90,10 @@ Five rules bind every phase, restated from `skills/pipeline-core/SKILL.md`:
 2. **The source is read-only**, enforced by the scripts, not by
    convention. The only writes ever permitted are the ones an approved
    plan explicitly lists: creating a publication and replication slot
-   for logical replication, quiescing writes at cutover, and reverting
-   that quiesce during a rollback.
+   for logical replication, quiescing writes at cutover in demo mode,
+   reverting that quiesce during a rollback, and dropping the
+   publication and slot once replication is no longer needed (at
+   cutover or during rollback).
 3. **Secrets never appear in output.** Only environment variable names
    go into `migration.yaml`, artifacts, or anything printed; passwords
    and full connection URLs are never echoed.
@@ -129,6 +131,9 @@ something to point at production without dry-running it first.
 - **Live-tested cloud provisioning.** The GCP, AWS, and Azure provider
   skills are documentation-derived contracts, not exercised against
   real accounts.
+- **Migration of database-adjacent infrastructure.** App connection
+  pooling, DNS, and monitoring are the operator's concern, not this
+  pipeline's.
 
 ## Development
 
@@ -144,6 +149,7 @@ db-drift/
 ├── scripts/dbdrift.py           the CLI: pg, seed, inventory, dump, restore,
 │                                 objcount, checksum, replicate, state
 ├── demo/scenario.md             the retail demo schema and seed spec
+├── docs/                        spec and plan documents
 └── tests/                       unit tests for the scripts
 ```
 
@@ -153,8 +159,9 @@ Run the test suite:
 python -m pytest -q
 ```
 
-19 tests pass, covering the state machine's transition and gate
-enforcement, checksum snapshot and diff, and inventory parsing.
+24 tests pass, covering the state machine's transition and gate
+enforcement, checksum snapshot and diff, inventory parsing, and the
+PGOPTIONS read-only/writable precedence that guards every source write.
 
 The acceptance run that produced the numbers in this README was a real
 execution of the whole pipeline against the demo environment: a fresh

@@ -54,10 +54,15 @@ until the gate is approved).
 3. Execute the runbook exactly, in order, echoing each step's real
    output into artifacts/07-cutover-runbook.md under an "Execution log"
    heading as you go. The quiesce SQL runs via pg.run_sql WITHOUT
-   readonly (this is the single approved source write, per SKILL.md
+   readonly (this is an approved source write, per SKILL.md
    hard rule 2). Terminate sessions:
    SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-   WHERE datname = '<db>' AND pid <> pg_backend_pid().
+   WHERE datname = '<db>' AND pid <> pg_backend_pid()
+   AND backend_type = 'client backend'.
+   The backend_type filter matters: logical replication walsenders also
+   appear in pg_stat_activity with datname set to the decoded database,
+   and terminating one here would kill the replication connection right
+   before step 2 waits for zero lag.
    For logical_replication strategy only, after dropping the subscription
    on the target, drop the publication on the source with:
    `python "$SCRIPTS" replicate drop-publication <source flags> --name dbdrift_pub`
