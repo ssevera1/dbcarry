@@ -11,12 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PHASES = [
-    "assess", "plan", "provision", "migrate_schema",
+    "assess", "plan", "provision", "migrate_schema", "migrate_security",
     "migrate_data", "validate", "cutover",
 ]
 GATE_UNLOCKS = {"plan_approval": "provision", "cutover_approval": "cutover"}
 GATE_REQUIRES = {"plan_approval": "plan", "cutover_approval": "validate"}
-STRATEGIES = ("dump_restore", "logical_replication")
+STRATEGIES = ("dump_restore", "logical_replication", "bulk_load")
+PROVIDERS = ("local", "gcp", "aws", "azure", "bigquery")
 STATUSES = ("pending", "in_progress", "complete", "failed")
 
 
@@ -197,8 +198,7 @@ def main(argv):
 
     p = sub.add_parser("init")
     p.add_argument("--engine", default="postgres")
-    p.add_argument("--provider", required=True,
-                   choices=["local", "gcp", "aws", "azure"])
+    p.add_argument("--provider", required=True, choices=list(PROVIDERS))
     for verb in ("start-phase", "complete-phase", "fail-phase"):
         p = sub.add_parser(verb)
         p.add_argument("--phase", required=True, choices=PHASES)

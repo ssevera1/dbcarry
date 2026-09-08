@@ -11,6 +11,12 @@ SUBCOMMANDS = {
     "objcount": "db_drift.dump_restore",
     "checksum": "db_drift.checksum",
     "replicate": "db_drift.replicate",
+    "security": "db_drift.security",
+    "bq-schema": "db_drift.bq_schema",
+    "bq-security": "db_drift.bq_security",
+    "bq-load": "db_drift.bq_load",
+    "bq-validate": "db_drift.bq_validate",
+    "bq-backend": "db_drift.bq_backend",
 }
 
 

@@ -138,3 +138,22 @@ def test_mark_rollback():
     assert st["rollback"]["reason"] == "validation failed twice"
     with pytest.raises(sm.StateError, match="already"):
         sm.apply_mark_rollback(st, "again")
+
+
+def test_pipeline_has_security_phase_between_schema_and_data():
+    i = sm.PHASES.index
+    assert i("migrate_schema") < i("migrate_security") < i("migrate_data")
+
+
+def test_bulk_load_is_a_strategy():
+    st = complete_through(fresh(), "assess")
+    sm.apply_start(st, "plan")
+    sm.apply_set_strategy(st, "bulk_load")
+    assert st["strategy"] == "bulk_load"
+
+
+def test_bigquery_provider_accepted():
+    st = sm.new_state("bq-run", "postgres", "bigquery")
+    assert st["provider"] == "bigquery"
+    assert "bigquery" in sm.PROVIDERS
+    assert sm.verify_state(st) == []
