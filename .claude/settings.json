@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/dbdrift.py:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+      "Bash(bq show:*)", "Bash(bq ls:*)", "Bash(bq get-iam-policy:*)",
+      "Bash(gcloud auth list:*)", "Bash(gcloud config get-value:*)",
+      "Bash(gcloud projects get-iam-policy:*)", "Bash(gcloud data-catalog taxonomies list:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [{"type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/guard_state.py\""}]
+      }
+    ]
+  }
+}
