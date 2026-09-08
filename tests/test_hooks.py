@@ -36,6 +36,14 @@ def test_blocks_edit_on_state_json(guard):
     assert "state.json" in reason and "state" in reason.lower()
 
 
+def test_reason_lists_every_state_cli_verb(guard):
+    _, reason = guard.decide(edit("migrations/x/state.json"))
+    for verb in ("init", "start-phase", "complete-phase", "fail-phase",
+                 "approve-gate", "decline-gate", "set-strategy",
+                 "mark-rollback", "verify", "show"):
+        assert verb in reason, verb
+
+
 def test_allows_edit_on_migration_yaml(guard):
     assert guard.decide(edit("migrations/x/migration.yaml")) == (0, "")
 
@@ -64,7 +72,19 @@ def test_settings_json_parses_and_names_hook():
     allow = settings["permissions"]["allow"]
     assert "Bash(python scripts/dbdrift.py:*)" in allow
     assert "Bash(python -m pytest:*)" in allow
-    assert set(settings) == {"permissions", "hooks"}
+    assert {"permissions", "hooks"} <= set(settings)
+
+
+def test_settings_hook_matcher_covers_every_guarded_tool():
+    # PowerShell is the primary shell on Windows. A matcher that omits it
+    # leaves the guard silent for every PowerShell command.
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    guarded = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash",
+               "PowerShell"}
+    for entry in settings["hooks"]["PreToolUse"]:
+        commands = [h["command"] for h in entry["hooks"]]
+        if any("guard_state.py" in c for c in commands):
+            assert guarded <= set(entry["matcher"].split("|"))
 
 
 # ------------------------------------------------------- additional coverage
@@ -86,6 +106,12 @@ def test_notebook_path_key_is_checked(guard):
     "/home/op/proj/migrations/demo-run/state.json",
     "sandbox/migrations/demo-run/state.json",
     "MIGRATIONS/x/State.json",
+    # Windows resolves each of these to the real file.
+    "migrations/x/state.json ",
+    "migrations/x/state.json.",
+    "migrations/x/state.json::$DATA",
+    "migrations/x/state.json:stream",
+    r"D:\proj\migrations\x\state.json. ",
 ])
 def test_absolute_and_windows_paths_are_blocked(guard, path):
     assert guard.decide(edit(path))[0] == 2
@@ -112,6 +138,26 @@ def test_state_json_outside_migrations_is_allowed(guard, path):
     r"del migrations\x\state.json",
     "Remove-Item migrations/x/state.json",
     "remove-item -Force migrations/x/state.json",
+    # copies, moves, appends, truncations
+    "cp backup.json migrations/x/state.json",
+    "mv backup.json migrations/x/state.json",
+    r"copy backup.json migrations\x\state.json",
+    r"move backup.json migrations\x\state.json",
+    "Copy-Item backup.json migrations/x/state.json",
+    "Move-Item -Path backup.json -Destination migrations/x/state.json",
+    "Add-Content migrations/x/state.json '{}'",
+    "Clear-Content migrations/x/state.json",
+    "truncate -s 0 migrations/x/state.json",
+    "dd if=backup.json of=migrations/x/state.json",
+    'dd if=backup.json of="migrations/x/state.json"',
+    # in-place editors with combined or long flags
+    "sed -Ei 's/pending/complete/' migrations/x/state.json",
+    "sed -i.bak 's/pending/complete/' migrations/x/state.json",
+    "sed --in-place 's/pending/complete/' migrations/x/state.json",
+    "sed -e 's/pending/complete/' -i migrations/x/state.json",
+    "perl -pi -e 's/pending/complete/' migrations/x/state.json",
+    "perl -i.bak -pe 's/pending/complete/' migrations/x/state.json",
+    "perl -p -i -e 's/pending/complete/' migrations/x/state.json",
 ])
 def test_bash_write_forms_are_blocked(guard, command):
     code, reason = guard.decide(bash(command))
@@ -130,6 +176,14 @@ def test_bash_write_forms_are_blocked(guard, command):
     "echo hello > notes.txt",
     "python -c \"assert len(open('migrations/x/state.json').read()) >= 2\"",
     "cat migrations/x/state.json 2>>errors.log",
+    # read-only uses of the in-place editors and dd
+    "sed -n 1,5p migrations/x/state.json",
+    "sed -E 's/\"//g' migrations/x/state.json",
+    "perl -ne 'print if /phase/' migrations/x/state.json",
+    "perl -MJSON -e 'print 1' migrations/x/state.json",
+    "dd if=migrations/x/state.json of=/dev/null",
+    # a sibling file, consistent with the Edit rule
+    "echo x > migrations/x/state.json.bak",
 ])
 def test_bash_reads_and_unrelated_writes_are_allowed(guard, command):
     assert guard.decide(bash(command)) == (0, "")
@@ -198,6 +252,16 @@ def test_hook_uses_only_stdlib():
     "echo '{}' > '$WS/state.json'",
     "echo '{}' >> ${WS}/state.json",
     "echo '{}' > out.txt; echo '{}' > migrations/x/state.json",
+    # mixed quoting: the target is a run of quoted and bare segments
+    'echo \'{}\' > "$WS"/state.json',
+    'echo x > migrations/x/"state.json"',
+    "echo x > 'migrations/x'/state.json",
+    "echo x > \"$WS\"'/state.json'",
+    "echo x > migrations/x/state.json;echo done",
+    "echo x > migrations/x/state.json|cat",
+    # Windows name forms that resolve to the same file
+    "echo x > migrations/x/state.json.",
+    "echo x > migrations/x/state.json::$DATA",
 ])
 def test_redirect_into_state_json_is_blocked_in_every_form(guard, command):
     code, reason = guard.decide(bash(command))
@@ -218,6 +282,11 @@ def test_redirect_elsewhere_beside_a_state_json_read_is_allowed(guard, command):
     "Set-Content -Path migrations/x/state.json -Value '{}'",
     "'{}' > migrations\\x\\state.json",
     "Remove-Item migrations/x/state.json",
+    "Copy-Item backup.json migrations/x/state.json",
+    "Move-Item backup.json migrations/x/state.json",
+    "Add-Content -Path migrations/x/state.json -Value '{}'",
+    "Clear-Content migrations/x/state.json",
+    "'{}' > \"$ws\"/state.json",
 ])
 def test_powershell_tool_is_guarded_like_bash(guard, command):
     payload = {"tool_name": "PowerShell", "tool_input": {"command": command}}

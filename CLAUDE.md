@@ -29,8 +29,9 @@ agents, and skills load from the working tree.
   teardown, cost). `skills/security-mapping/` is the security-phase rulebook.
 
 Migration workspaces live under `migrations/<name>/` in the user's project
-directory (the shell CWD), never inside this repository, and are never
-committed here. `sandbox/` is gitignored scratch space for acceptance runs.
+directory (the shell CWD) and are never committed to this repository
+(`migrations/` and `sandbox/` are gitignored). `sandbox/` is scratch space
+for acceptance runs.
 
 ## Hard rules
 

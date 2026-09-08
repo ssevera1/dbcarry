@@ -15,15 +15,24 @@ Two shapes are refused:
 
 - An editing tool whose target path ends in state.json under a
   migrations directory (any depth, either path separator, any case).
+  The last path component is compared the way Windows opens it:
+  trailing spaces and dots are ignored, and an NTFS stream suffix
+  (`state.json::$DATA`, `state.json:name`) names the same file.
 - A Bash (or PowerShell) command that mentions state.json together with
-  a write or delete marker: a redirect whose target is a state.json (any
-  of `>`, `>>`, `>|`, `1>`, `2>`, `&>`, quoted or not), or `sed -i`,
-  `Set-Content`, `Out-File`, `tee`, `rm`, `del`, or `Remove-Item`
-  anywhere in the command.
+  a write or delete marker. Either a redirect whose target names a
+  state.json (any of `>`, `>>`, `>|`, `1>`, `2>`, `&>`, and dd's `of=`;
+  the target may mix quoted and bare segments, as in `"$WS"/state.json`
+  or `'migrations/x'/state.json`), or an in-place editor, copier, mover,
+  writer, or deleter anywhere in the command: `sed` with an in-place
+  flag (`-i`, `-Ei`, `-i.bak`, `--in-place`, or `-i` after `-e`), `perl`
+  with `-i` (`-pi`, `-i.bak`), `cp`, `mv`, `copy`, `move`, `rm`, `del`,
+  `tee`, `truncate`, `Set-Content`, `Add-Content`, `Clear-Content`,
+  `Out-File`, `Copy-Item`, `Move-Item`, or `Remove-Item`.
 
 Everything else is allowed, including Read, git, the state CLI itself,
-plain reads such as `cat migrations/x/state.json`, and a redirect that
-lands somewhere else (`cat migrations/x/state.json 2>>errors.log`).
+plain reads such as `cat migrations/x/state.json`, a redirect that
+lands somewhere else (`cat migrations/x/state.json 2>>errors.log`), and
+a sibling file such as `state.json.bak` under either rule.
 
 The hook never crashes on unexpected input. Anything it cannot interpret
 (bad JSON, a non-object payload, missing keys) is allowed with exit 0 so a
@@ -40,33 +49,41 @@ PATH_KEYS = ("file_path", "notebook_path")
 STATE_FILE = "state.json"
 MIGRATIONS_DIR = "migrations"
 
-# A redirect whose target is a state.json. The operator is `>`, `>>`, or
-# `>|`, optionally prefixed by a descriptor digit or `&` (so `1>`, `2>`,
-# `&>` all count), and must not be the comparison `>=`. The target is the
-# next token: a double-quoted string, a single-quoted string, or a bare
-# word that stops at whitespace, quotes, or another shell operator. Only
-# a target ending in state.json matters, so `cat state.json > /dev/null`
-# and `cat state.json 2>>errors.log` pass.
-REDIRECT_INTO_STATE = re.compile(
-    r"(?:\d|&)?>>?\|?(?!=)\s*"
-    r"(?:\"[^\"]*state\.json\b"
-    r"|'[^']*state\.json\b"
-    r"|[^\s\"'<>|;&]*state\.json\b)",
+# A redirect operator and its target. The operator is `>`, `>>`, or `>|`,
+# optionally prefixed by a descriptor digit or `&` (so `1>`, `2>`, `&>`
+# all count) and never the comparison `>=`; dd's `of=` counts as one too.
+# The target is the whole run of segments that follows with nothing
+# between them: double-quoted, single-quoted, or bare characters up to
+# whitespace or another shell operator. That makes `"$WS"/state.json`,
+# `'migrations/x'/state.json`, and `migrations/x/"state.json"` each one
+# target. Quoted segments need their closing quote: a `>` inside a quoted
+# argument (`git log --format='%h -> %s' -- migrations/x/state.json`)
+# must not swallow the rest of the command as its target. The joined
+# target is then checked for a state.json final component (see
+# _names_state_file), so `cat state.json > /dev/null`, `cat state.json
+# 2>>errors.log`, and `echo x > state.json.bak` pass.
+REDIRECT_TARGET = re.compile(
+    r"(?:(?:\d|&)?>>?\|?(?!=)\s*|\bof=)"
+    r"((?:\"[^\"]*\"|'[^']*'|[^\s\"'<>|;&]+)+)",
     re.IGNORECASE,
 )
 
-# In-place editors, writers, and deleters. Any of these anywhere in a
-# command that also mentions state.json blocks the call. Over-inclusive
-# on purpose (`rm -rf build; cat migrations/x/state.json` is refused):
-# the model can split the command, and a missed write cannot be undone.
+# In-place editors, copiers, movers, writers, and deleters. Any of these
+# anywhere in a command that also mentions state.json blocks the call.
+# Over-inclusive on purpose (`rm -rf build; cat migrations/x/state.json`
+# is refused): the model can split the command, and a missed write cannot
+# be undone. sed's in-place flag may be combined (`-Ei`, `-ni`), carry a
+# backup suffix (`-i.bak`), be spelled long (`--in-place`), or come after
+# other options (`-e ... -i`), so anything from `sed` to the next pipe or
+# separator is scanned for it. perl's `-i` is matched case-sensitively in
+# a cluster of the argument-free switches (`-pi`, `-ni`, `-i.bak`) so
+# `-Ilib` and `-MJSON` do not count.
 DESTRUCTIVE_MARKERS = re.compile(
-    r"\bsed\s+-i\b"
-    r"|\bSet-Content\b"
-    r"|\bOut-File\b"
-    r"|\btee\s"
-    r"|\brm\s"
-    r"|\bdel\s"
-    r"|\bRemove-Item\b",
+    r"\bsed\b[^|;&]*(?:\s-\w*i\w*|--in-place)"
+    r"|\bperl\b[^|;&]*(?-i:\s-[pnlwa]*i)"
+    r"|\b(?:cp|mv|copy|move|rm|del|tee|truncate)\s"
+    r"|\b(?:Set-Content|Add-Content|Clear-Content|Out-File"
+    r"|Copy-Item|Move-Item|Remove-Item)\b",
     re.IGNORECASE,
 )
 
@@ -77,17 +94,37 @@ def _reason(what):
     return (
         f"db-drift guard: refusing {what}. A migration's state.json is never "
         "hand-edited (pipeline-core hard rule 1). Change state through the "
-        f"state CLI instead: {STATE_CLI} (verbs: start-phase, complete-phase, "
-        "fail-phase, approve-gate, decline-gate, set-strategy, mark-rollback, "
-        "verify, show)."
+        f"state CLI instead: {STATE_CLI} (verbs: init, start-phase, "
+        "complete-phase, fail-phase, approve-gate, decline-gate, set-strategy, "
+        "mark-rollback, verify, show)."
     )
+
+
+def _names_state_file(name):
+    """True when a final path component opens the state file on Windows.
+
+    NTFS ignores trailing spaces and dots in a name, and `name::$DATA` or
+    `name:stream` addresses a stream of the same file, so those spellings
+    are normalized away before the comparison. The rule is applied on
+    every platform: none of those spellings is a legitimate sibling file.
+    """
+    return name.split(":", 1)[0].rstrip(" .").lower() == STATE_FILE
 
 
 def _is_migration_state_file(path):
     parts = [p for p in re.split(r"[\\/]+", path) if p]
-    if len(parts) < 2 or parts[-1].lower() != STATE_FILE:
+    if len(parts) < 2 or not _names_state_file(parts[-1]):
         return False
     return any(p.lower() == MIGRATIONS_DIR for p in parts[:-1])
+
+
+def _redirects_into_state_file(command):
+    for match in REDIRECT_TARGET.finditer(command):
+        target = re.sub(r"[\"']", "", match.group(1))
+        parts = [p for p in re.split(r"[\\/]+", target) if p]
+        if parts and _names_state_file(parts[-1]):
+            return True
+    return False
 
 
 def decide(payload):
@@ -113,7 +150,7 @@ def decide(payload):
         command = tool_input.get("command")
         if not isinstance(command, str) or STATE_FILE not in command.lower():
             return 0, ""
-        if REDIRECT_INTO_STATE.search(command):
+        if _redirects_into_state_file(command):
             return 2, _reason(f"a {tool} command that redirects output "
                               "into a state.json")
         if DESTRUCTIVE_MARKERS.search(command):

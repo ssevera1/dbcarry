@@ -6,13 +6,28 @@ privileges, and security-barrier views from the PostgreSQL catalogs. It
 runs read-only and reads no data rows. build_security_inventory is pure
 so it can be unit tested from fixtures.
 
+Shape notes (spec section 6):
+
+- memberships[] rows carry admin_option plus the PostgreSQL 16
+  per-membership inherit_option and set_option. Older servers have no
+  such options and the inventory records true for both, which is what
+  those servers enforce. roles[].member_of stays a plain list of names.
+- default_privileges[].schema is null for a global default ACL (ALTER
+  DEFAULT PRIVILEGES without IN SCHEMA), which applies in every schema.
+- policies[].roles is sorted by name.
+
 `security diff` compares two inventories on the fields that survive a
 dump and restore, ignoring owner names and owner-derived rows because
-restore changes ownership.
+restore changes ownership. Target roles the source never mentioned
+(platform roles on a managed service, for example) are listed under
+unsynced_target_roles and do not affect the match.
 
 `security sync-roles` creates missing roles and memberships on a
 Postgres target (pg_dump does not carry role attributes). It never emits
 SUPERUSER and never sets passwords; the operator does that out of band.
+Role and group names are quoted identifiers inside DO blocks tagged
+$dbdrift$; a name containing that tag is refused rather than let it end
+the block early.
 
 Cloud targets: every query uses pg_roles and aclexplode/acldefault, which
 do not need superuser. pg_authid is never read.
@@ -28,21 +43,40 @@ SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema', 'pg_toast')"
 POLICY_COMMANDS = {"r": "SELECT", "a": "INSERT", "w": "UPDATE",
                    "d": "DELETE", "*": "ALL"}
 
+# Separator for a role list aggregated into one psql cell. A role name
+# may legally contain a comma, so the query joins with the ASCII unit
+# separator, which neither psql nor str.splitlines treats specially.
+LIST_SEP = "\x1f"
+
+# Dollar-quote tag for the DO blocks sync-roles emits. Quoting an
+# identifier does not protect against a name that contains the tag
+# itself, so sync_roles_sql refuses such names.
+DOLLAR_TAG = "$dbdrift$"
+
+# PostgreSQL 16 added per-membership INHERIT and SET options
+# (pg_auth_members.inherit_option and set_option).
+MEMBERSHIP_OPTIONS_MIN_VERSION = 160000
+VERSION_QUERY = "SELECT current_setting('server_version_num')"
+
+_MEMBERSHIPS_TAIL = (
+    "FROM pg_auth_members am "
+    "JOIN pg_roles m ON m.oid = am.member "
+    "JOIN pg_roles g ON g.oid = am.roleid "
+    "WHERE m.rolname NOT LIKE 'pg\\_%' AND g.rolname NOT LIKE 'pg\\_%' "
+    "ORDER BY 1, 2")
+
 # The plan's queries, with one PG17 fix: acldefault takes a "char", so
 # the relkind CASE is cast explicitly. psql output is one row per line,
 # tab separated, so expression text has whitespace collapsed in SQL and
-# booleans arrive as t/f.
+# booleans arrive as t/f. The memberships entry is the pre-16 form;
+# take_inventory swaps in memberships_query(version) for 16+ servers.
 QUERIES = {
     "roles": (
         "SELECT rolname, rolcanlogin, rolsuper, rolinherit, rolbypassrls, "
         "rolcreaterole, rolcreatedb "
         "FROM pg_roles WHERE rolname NOT LIKE 'pg\\_%' ORDER BY 1"),
     "memberships": (
-        "SELECT m.rolname, g.rolname, am.admin_option FROM pg_auth_members am "
-        "JOIN pg_roles m ON m.oid = am.member "
-        "JOIN pg_roles g ON g.oid = am.roleid "
-        "WHERE m.rolname NOT LIKE 'pg\\_%' AND g.rolname NOT LIKE 'pg\\_%' "
-        "ORDER BY 1, 2"),
+        "SELECT m.rolname, g.rolname, am.admin_option " + _MEMBERSHIPS_TAIL),
     "schema_acl": (
         "SELECT n.nspname, pg_get_userbyid(n.nspowner), "
         "CASE WHEN a.grantee = 0 THEN 'PUBLIC' "
@@ -84,7 +118,7 @@ QUERIES = {
     "policies": (
         "SELECT n.nspname, c.relname, p.polname, p.polcmd, p.polpermissive, "
         "coalesce((SELECT string_agg(CASE WHEN r = 0 THEN 'PUBLIC' "
-        "ELSE pg_get_userbyid(r) END, ',' ORDER BY r) "
+        "ELSE pg_get_userbyid(r) END, E'\\x1f' ORDER BY r) "
         "FROM unnest(p.polroles) r), 'PUBLIC'), "
         "coalesce(regexp_replace(pg_get_expr(p.polqual, p.polrelid), "
         "'\\s+', ' ', 'g'), ''), "
@@ -103,14 +137,34 @@ QUERIES = {
         "FROM pg_default_acl d "
         "LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace, "
         "aclexplode(d.defaclacl) a ORDER BY 1, 2, 3, 4, 5"),
+    # The server parses the option value, so every boolean spelling it
+    # accepts (true, on, yes, y, t, tr, 1, ...) is matched.
     "security_barrier_views": (
         "SELECT n.nspname, c.relname FROM pg_class c "
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         f"WHERE c.relkind = 'v' AND n.nspname NOT IN {SYSTEM_SCHEMAS} "
         "AND EXISTS (SELECT 1 FROM unnest(c.reloptions) o "
-        "WHERE lower(o) ~ '^security_barrier=(true|on|yes|1|t)$') "
+        "WHERE o LIKE 'security_barrier=%' "
+        "AND split_part(o, '=', 2)::boolean) "
         "ORDER BY 1, 2"),
 }
+
+
+def memberships_query(version_num):
+    """Membership query for a server version number such as 170005.
+
+    From 16 on the row also carries inherit_option and set_option.
+    """
+    if version_num >= MEMBERSHIP_OPTIONS_MIN_VERSION:
+        return ("SELECT m.rolname, g.rolname, am.admin_option, "
+                "am.inherit_option, am.set_option " + _MEMBERSHIPS_TAIL)
+    return QUERIES["memberships"]
+
+
+def server_version_num(ci):
+    """Read server_version_num (for example 170005), read-only."""
+    rows = pg.query_rows(ci, VERSION_QUERY, readonly=True)
+    return int(rows[0][0])
 
 
 def _bool(cell):
@@ -127,11 +181,17 @@ def _quote(name):
 
 # ------------------------------------------------------------------ inventory
 
+def _membership_row(r):
+    """Three cells from a pre-16 server, five from 16 on."""
+    return {"member": r[0], "group": r[1], "admin_option": _bool(r[2]),
+            "inherit_option": _bool(r[3]) if len(r) > 3 else True,
+            "set_option": _bool(r[4]) if len(r) > 4 else True}
+
+
 def build_security_inventory(raw):
     """Shape raw psql rows into the security inventory (spec section 6)."""
     memberships = sorted(
-        ({"member": r[0], "group": r[1], "admin_option": _bool(r[2])}
-         for r in raw.get("memberships", [])),
+        (_membership_row(r) for r in raw.get("memberships", [])),
         key=lambda m: (m["member"], m["group"]))
     member_of = {}
     for m in memberships:
@@ -164,7 +224,7 @@ def build_security_inventory(raw):
             {"schema": r[0], "relation": r[1], "name": r[2],
              "command": POLICY_COMMANDS.get(r[3], r[3]),
              "permissive": _bool(r[4]),
-             "roles": [x for x in r[5].split(",") if x],
+             "roles": sorted(x for x in r[5].split(LIST_SEP) if x),
              "using": _text_or_none(r[6]), "with_check": _text_or_none(r[7])}
             for r in raw.get("policies", [])],
         "default_privileges": [
@@ -177,16 +237,24 @@ def build_security_inventory(raw):
 
 
 def take_inventory(ci):
-    """Run every catalog query read-only and shape the result."""
-    raw = {key: pg.query_rows(ci, sql, readonly=True)
-           for key, sql in QUERIES.items()}
+    """Run every catalog query read-only and shape the result.
+
+    The server version is read first so the memberships query can ask
+    for the 16+ per-membership options only where they exist.
+    """
+    version = server_version_num(ci)
+    raw = {}
+    for key, sql in QUERIES.items():
+        if key == "memberships":
+            sql = memberships_query(version)
+        raw[key] = pg.query_rows(ci, sql, readonly=True)
     return build_security_inventory(raw)
 
 
 # ----------------------------------------------------------------------- diff
 
 _ROLE_FIELDS = ("name", "can_login", "inherit", "bypass_rls")
-_MEMBER_FIELDS = ("member", "group")
+_MEMBER_FIELDS = ("member", "group", "inherit_option", "set_option")
 _SCHEMA_FIELDS = ("schema", "grantee", "privilege", "grantable")
 _RELATION_FIELDS = ("schema", "relation", "kind", "grantee", "privilege",
                     "grantable")
@@ -198,6 +266,11 @@ DIFF_SECTIONS = ("roles", "memberships", "schema_privileges",
                  "relation_privileges", "column_privileges", "rls",
                  "policies")
 
+# Values assumed for fields an older inventory file or a spec-shaped
+# fixture may omit.
+_FIELD_DEFAULTS = {"grantable": False, "inherit_option": True,
+                   "set_option": True}
+
 
 def synced_role_names(security_inv):
     """Roles the sync creates: everything except postgres, superusers,
@@ -208,7 +281,7 @@ def synced_role_names(security_inv):
 
 
 def _memberships(security_inv):
-    """(member, group) pairs; falls back to roles[].member_of when the
+    """Membership rows; falls back to roles[].member_of when the
     inventory carries no memberships section."""
     rows = security_inv.get("memberships")
     if rows is None:
@@ -219,8 +292,12 @@ def _memberships(security_inv):
 
 
 def _key(row, fields):
-    return tuple(tuple(row[f]) if isinstance(row[f], list) else row[f]
-                 for f in fields)
+    """Comparison key; list-valued fields compare as sets."""
+    values = []
+    for f in fields:
+        v = row.get(f, _FIELD_DEFAULTS.get(f))
+        values.append(tuple(sorted(v)) if isinstance(v, list) else v)
+    return tuple(values)
 
 
 def _unkey(key, fields):
@@ -245,9 +322,9 @@ def _comparable(inv):
         "memberships": [m for m in _memberships(inv)
                         if m["member"] in synced and m["group"] in synced],
         "schema_privileges": [r for r in inv.get("schema_privileges", [])
-                              if r["grantee"] != r["owner"]],
+                              if r.get("grantee") != r.get("owner")],
         "relation_privileges": [r for r in inv.get("relation_privileges", [])
-                                if r["grantee"] != r["owner"]],
+                                if r.get("grantee") != r.get("owner")],
         "column_privileges": inv.get("column_privileges", []),
         "rls": inv.get("rls", []),
         "policies": inv.get("policies", []),
@@ -260,7 +337,12 @@ def diff_security(left, right, ignore_roles=False):
     Owner-derived privilege rows (grantee equal to the owner) are dropped
     because restore changes ownership; grantor names are never part of
     the inventory. Roles compare can_login, inherit, and bypass_rls only,
-    and only for roles the sync would create.
+    and only for roles the sync would create. Memberships compare
+    (member, group) plus the 16+ inherit and set options.
+
+    Roles on the right that the left never mentions (platform roles on a
+    managed target) are not "extra": they and their memberships are
+    reported under unsynced_target_roles, which does not affect match.
     """
     fields = {
         "roles": _ROLE_FIELDS, "memberships": _MEMBER_FIELDS,
@@ -270,8 +352,16 @@ def diff_security(left, right, ignore_roles=False):
         "policies": _POLICY_FIELDS,
     }
     lc, rc = _comparable(left), _comparable(right)
+    source_names = {r["name"] for r in left.get("roles", [])}
+    unsynced = sorted(r["name"] for r in rc["roles"]
+                      if r["name"] not in source_names)
+    rc["roles"] = [r for r in rc["roles"] if r["name"] in source_names]
+    rc["memberships"] = [m for m in rc["memberships"]
+                         if m["member"] in source_names
+                         and m["group"] in source_names]
     report = {section: _compare(lc[section], rc[section], fields[section])
               for section in DIFF_SECTIONS}
+    report["unsynced_target_roles"] = unsynced
     checked = [s for s in DIFF_SECTIONS if not (ignore_roles and s == "roles")]
     report["match"] = not any(
         report[s]["missing"] or report[s]["extra"] for s in checked)
@@ -291,44 +381,102 @@ def _role_attrs(role, allow_bypassrls, explicit_no_bypass):
     return " ".join(parts)
 
 
-def sync_roles_sql(security_inv, allow_bypassrls=True):
+def _tf(value):
+    return "TRUE" if value else "FALSE"
+
+
+def _check_name(name):
+    if DOLLAR_TAG in name:
+        raise ValueError(
+            f"role name {name!r} contains the dollar-quote tag {DOLLAR_TAG}; "
+            "refusing to build sync statements for it")
+
+
+def _do_block(statement):
+    return (f"DO {DOLLAR_TAG} BEGIN {statement}; "
+            f"EXCEPTION WHEN duplicate_object THEN NULL; END {DOLLAR_TAG};")
+
+
+def membership_option_rows(security_inv):
+    """Memberships with inherit or set switched off. A pre-16 target has
+    no such options and replays these as ordinary inheriting grants."""
+    return [m for m in _memberships(security_inv)
+            if not m.get("inherit_option", True)
+            or not m.get("set_option", True)]
+
+
+def sync_roles_sql(security_inv, allow_bypassrls=True,
+                   membership_options=True):
     """Idempotent statements that reproduce roles and memberships.
 
     Never emits SUPERUSER, CREATEROLE, CREATEDB, or a password. Roles
     named postgres and superusers are skipped, as are memberships that
     involve a skipped role. With allow_bypassrls=False no BYPASSRLS or
     NOBYPASSRLS clause is emitted at all, because setting that attribute
-    needs superuser and cloud targets refuse it.
+    needs superuser and managed targets refuse it.
+
+    membership_options=True emits every GRANT as WITH ADMIN x, INHERIT y,
+    SET z (PostgreSQL 16+ syntax, which also updates the options of an
+    existing membership). False emits the pre-16 form, WITH ADMIN OPTION
+    only, which cannot express INHERIT FALSE or SET FALSE.
+
+    Raises ValueError for a role or group name containing DOLLAR_TAG.
     """
     synced = synced_role_names(security_inv)
     roles = sorted((r for r in security_inv.get("roles", [])
                     if r["name"] in synced), key=lambda r: r["name"])
     creates, alters, grants = [], [], []
     for role in roles:
+        _check_name(role["name"])
         name = _quote(role["name"])
-        creates.append(
-            f"DO $$ BEGIN CREATE ROLE {name} "
-            f"{_role_attrs(role, allow_bypassrls, False)}; "
-            "EXCEPTION WHEN duplicate_object THEN NULL; END $$;")
+        creates.append(_do_block(
+            f"CREATE ROLE {name} "
+            f"{_role_attrs(role, allow_bypassrls, False)}"))
         alters.append(
             f"ALTER ROLE {name} {_role_attrs(role, allow_bypassrls, True)};")
     for m in sorted(_memberships(security_inv),
                     key=lambda m: (m["member"], m["group"])):
         if m["member"] not in synced or m["group"] not in synced:
             continue
-        admin = " WITH ADMIN OPTION" if m.get("admin_option") else ""
-        grants.append(
-            f"DO $$ BEGIN GRANT {_quote(m['group'])} TO "
-            f"{_quote(m['member'])}{admin}; "
-            "EXCEPTION WHEN duplicate_object THEN NULL; END $$;")
+        _check_name(m["group"])
+        _check_name(m["member"])
+        if membership_options:
+            opts = (f" WITH ADMIN {_tf(m.get('admin_option'))}, "
+                    f"INHERIT {_tf(m.get('inherit_option', True))}, "
+                    f"SET {_tf(m.get('set_option', True))}")
+        else:
+            opts = " WITH ADMIN OPTION" if m.get("admin_option") else ""
+        grants.append(_do_block(
+            f"GRANT {_quote(m['group'])} TO {_quote(m['member'])}{opts}"))
     return creates + alters + grants
 
 
 # ------------------------------------------------------------------------ CLI
 
+# memberships is optional on load because diff falls back to
+# roles[].member_of (the spec's example document has no memberships key).
+REQUIRED_SECTIONS = ("roles",) + tuple(
+    s for s in DIFF_SECTIONS if s != "memberships")
+
+
 def _load_json(path):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _load_inventory(path):
+    """Load a security inventory document and check its top-level shape."""
+    doc = _load_json(path)
+    if not isinstance(doc, dict):
+        raise ValueError(f"{path}: expected a JSON object holding a security "
+                         f"inventory, got {type(doc).__name__}")
+    bad = [s for s in REQUIRED_SECTIONS if not isinstance(doc.get(s), list)]
+    if "memberships" in doc and not isinstance(doc["memberships"], list):
+        bad.append("memberships")
+    if bad:
+        raise ValueError(f"{path}: not a security inventory; missing or "
+                         f"malformed sections: {', '.join(bad)}")
+    return doc
 
 
 def _summary(inv):
@@ -360,9 +508,13 @@ def main(argv):
                    metavar="SECURITY_JSON")
     pg.add_conn_args(p)
     p.add_argument("--no-bypassrls", action="store_true",
-                   help="never emit BYPASSRLS (cloud targets)")
+                   help="never emit BYPASSRLS or NOBYPASSRLS; both need "
+                        "superuser, so the playbook passes this for every "
+                        "provider except local")
     p.add_argument("--dry-run", action="store_true",
-                   help="print the statements, execute nothing")
+                   help="print the statements, execute nothing; the target "
+                        "version is not probed, so PostgreSQL 16+ GRANT "
+                        "syntax is assumed")
     args = parser.parse_args(argv[1:])
 
     try:
@@ -377,20 +529,30 @@ def main(argv):
                 print(text)
             return 0
         if args.verb == "diff":
-            report = diff_security(_load_json(args.left),
-                                   _load_json(args.right),
+            report = diff_security(_load_inventory(args.left),
+                                   _load_inventory(args.right),
                                    ignore_roles=args.ignore_roles)
             print(json.dumps(report, indent=2))
             return 0 if report["match"] else 1
         # sync-roles
-        inv = _load_json(args.source_file)
-        statements = sync_roles_sql(
-            inv, allow_bypassrls=not args.no_bypassrls)
+        inv = _load_inventory(args.source_file)
         if args.dry_run:
-            for stmt in statements:
+            for stmt in sync_roles_sql(
+                    inv, allow_bypassrls=not args.no_bypassrls):
                 print(stmt)
             return 0
         ci = pg.conn_from_args(args)
+        version = server_version_num(ci)
+        options = version >= MEMBERSHIP_OPTIONS_MIN_VERSION
+        if not options:
+            print(f"WARNING: target server_version_num {version} predates "
+                  "per-membership INHERIT and SET options; emitting plain "
+                  f"GRANT ({len(membership_option_rows(inv))} membership(s) "
+                  "with those options switched off cannot be reproduced)",
+                  file=sys.stderr)
+        statements = sync_roles_sql(
+            inv, allow_bypassrls=not args.no_bypassrls,
+            membership_options=options)
         for stmt in statements:
             pg.run_sql(ci, stmt)
         print(f"executed {len(statements)} statements on "
@@ -399,7 +561,8 @@ def main(argv):
     except pg.PgError as exc:
         print(f"SECURITY ERROR: {exc}", file=sys.stderr)
         return 1
-    except (OSError, ValueError, KeyError, IndexError) as exc:
+    except (OSError, ValueError, KeyError, IndexError, TypeError,
+            AttributeError) as exc:
         print(f"SECURITY ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 

@@ -1,9 +1,14 @@
 """BigQuery backends behind one interface.
 
 Backend is the protocol the schema, security, load, and validate modules
-call. LiveBackend shells out to the bq and gcloud CLIs. It is written
-from the CLI documentation and mock-tested through a fake runner; it is
-not live-tested in this repository. EmulatedBackend keeps a JSON model
+call. LiveBackend shells out to the bq and gcloud CLIs, except for
+creating taxonomies and policy tags and deleting taxonomies: gcloud has
+no such verbs (its taxonomies group offers describe, list, import,
+export, and IAM only, and import cannot add a tag to an existing
+taxonomy), so those three calls go to the Data Catalog REST API with a
+token minted by gcloud. Everything is written from the CLI and API
+documentation and mock-tested through fake runners; it is not
+live-tested in this repository. EmulatedBackend keeps a JSON model
 of datasets, tables, IAM, policy tags, and row access policies on disk
 plus the loaded NDJSON rows, and enforces the structural rules the
 pipeline relies on: a tagged column is readable only with the
@@ -25,7 +30,8 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +52,16 @@ LEGACY_ROLES = {"READER": ROLE_VIEWER, "WRITER": ROLE_EDITOR,
 # granted. metadataViewer and jobUser deliberately are not in this set.
 DATA_READ_ROLES = {ROLE_VIEWER, ROLE_EDITOR, ROLE_OWNER, ROLE_ADMIN}
 FORBIDDEN_MEMBERS = ("allUsers", "allAuthenticatedUsers")
+# The only specialGroup values bq accepts besides the two forbidden ones.
+PROJECT_SPECIAL_GROUPS = ("projectOwners", "projectReaders", "projectWriters")
+_MEMBER_KIND_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+_MEMBER_BAD_CHARS_RE = re.compile(r"[\s\"'`\\\x00-\x1f]")
+MIGRATION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+TAXONOMY_NAME_RE = re.compile(
+    r"^projects/([^/]+)/locations/([^/]+)/taxonomies/([^/]+)$")
+DATACATALOG_API = "https://datacatalog.googleapis.com/v1"
+# bq ls returns 50 items unless told otherwise; a real schema has more.
+BQ_LS_MAX_RESULTS = 10000
 
 TYPE_ALIASES = {"INTEGER": "INT64", "FLOAT": "FLOAT64", "BOOLEAN": "BOOL",
                 "DECIMAL": "NUMERIC", "BIGDECIMAL": "BIGNUMERIC"}
@@ -94,14 +110,48 @@ Token = collections.namedtuple("Token", "kind text start end")
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?")
 _TWO_CHAR_OPS = ("<>", "!=", "<=", ">=", "||")
+# An optional r, b, rb, or br prefix followed by the opening quote.
+_STRING_START_RE = re.compile(r"(?i)(rb|br|r|b)?(['\"])")
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "a": "\a",
+            "b": "\b", "f": "\f", "v": "\v"}
+
+
+def _read_string(sql, quote_at, raw):
+    """Read the literal whose opening quote sits at quote_at.
+
+    Handles single and triple quotes and backslash escapes. In a raw
+    literal the backslash is kept and still protects the next character,
+    so r'\\'' does not end at the inner quote. Returns (text, end).
+    """
+    q = sql[quote_at]
+    n = len(sql)
+    close = q * 3 if sql.startswith(q * 3, quote_at) else q
+    j = quote_at + len(close)
+    buf = []
+    while j < n:
+        if sql.startswith(close, j):
+            return "".join(buf), j + len(close)
+        c = sql[j]
+        if c == "\\" and j + 1 < n:
+            nxt = sql[j + 1]
+            buf.append(c + nxt if raw else _ESCAPES.get(nxt, nxt))
+            j += 2
+            continue
+        buf.append(c)
+        j += 1
+    raise SqlSyntaxError("unterminated string literal")
 
 
 def tokenize_sql(sql):
     """Split SQL into tokens with source positions.
 
     Kinds: word, ident (backticked, text without the backticks), string
-    (text unescaped), number, op (two-character operators), punct (one
-    character). Comments are dropped.
+    (text unescaped; raw literals keep their backslashes), bytes (a b or
+    rb prefixed literal), number, op (two-character operators), punct
+    (one character). Comments are dropped. Triple-quoted literals are
+    read as one token. Two adjacent literals stay two tokens, as BigQuery
+    has no doubled-quote escape. A bare identifier outside [A-Za-z0-9_]
+    is a syntax error, as it is in BigQuery.
     """
     tokens = []
     i, n = 0, len(sql)
@@ -127,20 +177,13 @@ def tokenize_sql(sql):
             tokens.append(Token("ident", sql[i + 1:j], i, j + 1))
             i = j + 1
             continue
-        if ch in ("'", '"'):
-            j = i + 1
-            buf = []
-            while j < n and sql[j] != ch:
-                if sql[j] == "\\" and j + 1 < n:
-                    buf.append(sql[j + 1])
-                    j += 2
-                    continue
-                buf.append(sql[j])
-                j += 1
-            if j >= n:
-                raise SqlSyntaxError("unterminated string literal")
-            tokens.append(Token("string", "".join(buf), i, j + 1))
-            i = j + 1
+        m = _STRING_START_RE.match(sql, i) if ch in "'\"rRbB" else None
+        if m:
+            prefix = (m.group(1) or "").lower()
+            text, end = _read_string(sql, m.start(2), "r" in prefix)
+            tokens.append(Token("bytes" if "b" in prefix else "string",
+                                text, i, end))
+            i = end
             continue
         if ch.isdigit() or (ch == "." and i + 1 < n and sql[i + 1].isdigit()):
             m = _NUMBER_RE.match(sql, i)
@@ -149,6 +192,11 @@ def tokenize_sql(sql):
             continue
         if ch.isalpha() or ch == "_":
             m = _WORD_RE.match(sql, i)
+            if m is None:
+                raise SqlSyntaxError(
+                    f"unsupported character {ch!r} at offset {i}; bare "
+                    "identifiers use [A-Za-z0-9_], anything else needs "
+                    "backticks")
             tokens.append(Token("word", m.group(0), i, m.end()))
             i = m.end()
             continue
@@ -177,18 +225,31 @@ def _match_paren(tokens, idx):
 
 
 def split_statements(sql):
-    """Return [(statement_text, tokens)] for a script; ';' separates."""
+    """Return [(statement_text, tokens)] for a script; ';' separates.
+
+    Token offsets are rebased so they index into statement_text, not the
+    whole script; the DDL parser slices view bodies and policy filters
+    out of statement_text with them.
+    """
     tokens = tokenize_sql(sql)
     out, current = [], []
+
+    def flush():
+        base = current[0].start
+        text = sql[base:current[-1].end]
+        rebased = [Token(t.kind, t.text, t.start - base, t.end - base)
+                   for t in current]
+        out.append((text, rebased))
+
     for tok in tokens:
         if tok.kind == "punct" and tok.text == ";":
             if current:
-                out.append((sql[current[0].start:current[-1].end], current))
+                flush()
             current = []
         else:
             current.append(tok)
     if current:
-        out.append((sql[current[0].start:current[-1].end], current))
+        flush()
     return out
 
 
@@ -274,9 +335,11 @@ class _PredicateParser:
             tok.kind == "word" and tok.text.upper() not in _PREDICATE_KEYWORDS)
         if not is_column:
             raise Unevaluable(f"cannot evaluate {tok.text!r}")
-        column = self.columns.get(tok.text.lower())
-        if column is None:
+        field = self.columns.get(tok.text.lower())
+        if field is None:
             raise Unevaluable(f"unknown column {tok.text!r}")
+        _require_string_column(field)
+        column = field["name"]
         self.pos += 1
         tok = self.peek()
         if tok is None:
@@ -325,6 +388,27 @@ class _PredicateParser:
             self.pos += 3
             return ("session_user",)
         raise Unevaluable(f"unsupported right-hand side {tok.text!r}")
+
+
+def _require_string_column(field):
+    """Only a scalar STRING column can be compared with a string literal.
+
+    BigQuery does not coerce a string literal to INT64, BOOL, NUMERIC,
+    DATE, or TIMESTAMP, and arrays have no equality, so a predicate over
+    any other column is unevaluable here rather than a guessed count. A
+    field without a declared type is unevaluable for the same reason.
+    """
+    name = field.get("name")
+    type_name = _normalize_type(field.get("type"))
+    if not type_name:
+        raise Unevaluable(f"column {name} has no declared type")
+    if (field.get("mode") or "NULLABLE").upper() == "REPEATED":
+        raise Unevaluable(
+            f"column {name} is ARRAY<{type_name}>; arrays have no equality")
+    if type_name != "STRING":
+        raise Unevaluable(
+            f"column {name} is {type_name}; the emulator compares STRING "
+            "columns with string literals only")
 
 
 def _as_text(value):
@@ -380,7 +464,7 @@ def compile_predicate(predicate, fields):
         tokens = tokenize_sql(predicate or "")
     except SqlSyntaxError as exc:
         raise Unevaluable(str(exc))
-    columns = {f["name"].lower(): f["name"] for f in fields}
+    columns = {f["name"].lower(): f for f in fields}
     tree = _PredicateParser(tokens, columns).parse()
 
     def run(row, session_user):
@@ -393,8 +477,10 @@ def evaluate_predicate(predicate, rows, fields, session_user):
 
     Supports TRUE, FALSE, col = 'lit', col <> 'lit', col != 'lit',
     col IN ('a', 'b'), col NOT IN (...), col = SESSION_USER(), AND, OR,
-    NOT, and parentheses. NULL comparisons follow SQL three-valued logic.
-    Anything else raises Unevaluable.
+    NOT, and parentheses, where col is a scalar STRING column of fields
+    (each field needs name and type; mode defaults to NULLABLE). NULL
+    comparisons follow SQL three-valued logic. Anything else raises
+    Unevaluable.
     """
     fn = compile_predicate(predicate, fields)
     return sum(1 for row in rows if fn(row, session_user) is True)
@@ -403,15 +489,54 @@ def evaluate_predicate(predicate, rows, fields, session_user):
 # --------------------------------------------------------- shared helpers
 
 def _check_member(member):
+    """Reject anything that is not a typed IAM principal, and every
+    spelling of the two everyone-principals: bare, behind a type prefix
+    (specialGroup:allAuthenticatedUsers is how bq grants a dataset to
+    every Google account), or in another case."""
     if not isinstance(member, str) or not member:
         raise BackendError("member must be a non-empty principal string")
-    if member in FORBIDDEN_MEMBERS:
+    kind, sep, value = member.partition(":")
+    forbidden = {m.lower() for m in FORBIDDEN_MEMBERS}
+    if member.lower() in forbidden or value.lower() in forbidden:
         raise BackendError(
             f"refusing to bind {member}: db-drift never widens access to "
             "every user")
-    if ":" not in member:
+    if not sep or not value or not _MEMBER_KIND_RE.match(kind):
         raise BackendError(
             f"member {member!r} must be typed, for example group:x@example.com")
+    if _MEMBER_BAD_CHARS_RE.search(value):
+        raise BackendError(
+            f"member {member!r} contains whitespace, a quote, a backslash, "
+            "or a control character")
+    if kind == "specialGroup" and value not in PROJECT_SPECIAL_GROUPS:
+        raise BackendError(
+            f"member {member!r}: specialGroup accepts only "
+            + ", ".join(PROJECT_SPECIAL_GROUPS))
+
+
+def _parse_taxonomy_name(name, project, location):
+    """(project, location, id) from a full taxonomy resource name that
+    belongs to this backend. A policy tag name, a bare id, or a name in
+    another project or location is refused so a delete never lands on
+    the wrong resource. Data Catalog reports the project by number in
+    some names, so a purely numeric project segment is accepted."""
+    text = str(name or "")
+    if "/policyTags/" in text:
+        raise BackendError(
+            f"{text} names a policy tag, not a taxonomy")
+    m = TAXONOMY_NAME_RE.match(text)
+    if not m:
+        raise BackendError(
+            f"expected a full taxonomy resource name projects/P/locations/"
+            f"L/taxonomies/ID, got {text!r}")
+    proj, loc, tax_id = m.groups()
+    if loc.lower() != str(location).lower():
+        raise BackendError(
+            f"taxonomy {text} is in location {loc}, not {location}")
+    if proj != project and not proj.isdigit():
+        raise BackendError(
+            f"taxonomy {text} is in project {proj}, not {project}")
+    return proj, loc, tax_id
 
 
 def _principal_email(principal):
@@ -453,6 +578,22 @@ def _canonical_entry(entry):
             "dataset access entry needs role and member, or view")
     _check_member(member)
     return {"role": LEGACY_ROLES.get(role, role), "member": member}
+
+
+def _access_key(canon):
+    """What makes two canonical dataset access entries the same entry.
+
+    bq stores user: and serviceAccount: members alike as userByEmail and
+    reports a service account back as whichever prefix the reader
+    guesses, so both prefixes compare equal here and emails compare
+    without case.
+    """
+    if "view" in canon:
+        return ("view", canon["view"])
+    kind, _, value = canon["member"].partition(":")
+    if kind in ("user", "serviceAccount"):
+        kind = "userByEmail"
+    return (canon["role"], kind, value.lower())
 
 
 # ---------------------------------------------------------------- Backend
@@ -659,6 +800,9 @@ def _parse_column(group):
     if first.kind not in ("word", "ident"):
         raise BackendError(f"bad column definition near {first.text!r}")
     name = first.text
+    if not IDENT_RE.match(name):
+        raise BackendError(
+            f"column name {name!r} must match [A-Za-z0-9_]+")
     cur = _Ddl("", group)
     cur.pos = 1
     type_tok = cur.peek()
@@ -756,6 +900,17 @@ class EmulatedBackend(Backend):
             state = json.loads(path.read_text(encoding="utf-8"))
         except ValueError as exc:
             raise BackendError(f"emulator state at {path} is not JSON: {exc}")
+        if not isinstance(state, dict):
+            raise BackendError(
+                f"emulator state at {path} is not a JSON object")
+        for key in ("project", "location"):
+            stored = state.get(key)
+            wanted = getattr(self, key)
+            if stored is not None and stored != wanted:
+                raise BackendError(
+                    f"emulator state at {path} belongs to {key} {stored!r}, "
+                    f"not {wanted!r}; run bq-backend reset --yes to start "
+                    "over or restore the migration's bigquery config")
         base = self._empty_state()
         for key, value in base.items():
             state.setdefault(key, value)
@@ -803,17 +958,26 @@ class EmulatedBackend(Backend):
         return tbl
 
     def _resolve(self, parts):
+        """(project, dataset, table) from a parsed object name. Dataset
+        and table must be plain identifiers: the table name becomes a
+        file name under root/data, so a path in backticks is refused."""
         if len(parts) == 3:
             if parts[0] != self.project:
                 raise BackendError(
                     f"statement names project {parts[0]!r} but the emulated "
                     f"backend project is {self.project!r}")
-            return parts[0], parts[1], parts[2]
-        if len(parts) == 2:
-            return self.project, parts[0], parts[1]
-        raise BackendError(
-            "expected dataset.table or project.dataset.table, got "
-            f"{'.'.join(parts)!r}")
+            project, dataset, table = parts
+        elif len(parts) == 2:
+            project, (dataset, table) = self.project, parts
+        else:
+            raise BackendError(
+                "expected dataset.table or project.dataset.table, got "
+                f"{'.'.join(parts)!r}")
+        for label, value in (("dataset", dataset), ("table", table)):
+            if not IDENT_RE.match(value or ""):
+                raise BackendError(
+                    f"{label} name {value!r} must match [A-Za-z0-9_]+")
+        return project, dataset, table
 
     def _taxonomy(self, name):
         tax = self.state["taxonomies"].get(name)
@@ -877,7 +1041,13 @@ class EmulatedBackend(Backend):
             raise BackendError(f"cannot tokenize DDL: {exc}")
         applied = []
         for text, tokens in statements:
-            applied.append(self._apply_statement(text, tokens))
+            try:
+                applied.append(self._apply_statement(text, tokens))
+            except BackendError as exc:
+                # Earlier statements are already saved; leave the trace.
+                self.log.record("run_ddl", statements=applied,
+                                failed=text[:200], error=str(exc), sql=sql)
+                raise
             self.save()
         self.log.record("run_ddl", statements=applied, sql=sql)
 
@@ -1125,7 +1295,7 @@ class EmulatedBackend(Backend):
             if vtbl["type"] not in ("VIEW", "MATERIALIZED_VIEW"):
                 raise BackendError(
                     f"authorized view {vds}.{vtable} is a {vtbl['type']}")
-        if canon in ds["access"]:
+        if _access_key(canon) in {_access_key(e) for e in ds["access"]}:
             return
         ds["access"].append(canon)
         self.save()
@@ -1189,10 +1359,12 @@ class EmulatedBackend(Backend):
                 for name in self.state["taxonomies"]]
 
     def delete_taxonomy(self, name):
-        tax = self._taxonomy(name)
-        del self.state["taxonomies"][tax["name"]]
+        _parse_taxonomy_name(name, self.project, self.location)
+        if name not in self.state["taxonomies"]:
+            raise BackendError(f"taxonomy {name} not found")
+        del self.state["taxonomies"][name]
         self.save()
-        self.log.record("delete_taxonomy", name=tax["name"])
+        self.log.record("delete_taxonomy", name=name)
 
     def create_policy_tag(self, taxonomy, display_name, description=""):
         tax = self._taxonomy(taxonomy)
@@ -1349,13 +1521,6 @@ class EmulatedBackend(Backend):
                 return True
         return False
 
-    def _is_dataset_owner(self, principal, dataset):
-        for entry in self._dataset(dataset)["access"]:
-            if entry.get("member") == principal \
-                    and entry.get("role") == ROLE_OWNER:
-                return True
-        return False
-
     def _has_fine_grained_reader(self, principal, tag):
         try:
             bindings = self._tag(tag)["bindings"]
@@ -1380,13 +1545,14 @@ class EmulatedBackend(Backend):
             return result("unevaluable", None,
                           f"{dataset}.{table} is a {tbl['type']}; the "
                           "emulator has no SQL engine to evaluate its body")
-        by_name = {f["name"]: f for f in tbl["fields"]}
+        # BigQuery resolves column names without regard to case.
+        by_name = {f["name"].lower(): f for f in tbl["fields"]}
         requested = []
         for col in columns:
             if col == "*":
                 requested.extend(by_name)
-            elif col in by_name:
-                requested.append(col)
+            elif col.lower() in by_name:
+                requested.append(col.lower())
             else:
                 return result("error", None,
                               f"unknown column {col!r} in {dataset}.{table}")
@@ -1395,14 +1561,16 @@ class EmulatedBackend(Backend):
                           f"{principal} has no data read role on "
                           f"{dataset}.{table} at table, dataset, or project "
                           "scope")
-        owner = self._is_dataset_owner(principal, dataset)
+        # Nobody bypasses a policy tag, dataset owners and project admins
+        # included: BigQuery always requires the fine-grained reader role.
         for col in requested:
-            for tag in (by_name[col].get("policyTags") or {}).get("names", []):
-                if owner or self._has_fine_grained_reader(principal, tag):
+            field = by_name[col]
+            for tag in (field.get("policyTags") or {}).get("names", []):
+                if self._has_fine_grained_reader(principal, tag):
                     continue
                 return result("denied", None,
-                              f"column {col} carries policy tag {tag} and "
-                              f"{principal} lacks {ROLE_FGR} on it")
+                              f"column {field['name']} carries policy tag "
+                              f"{tag} and {principal} lacks {ROLE_FGR} on it")
         rows = self._read_rows(dataset, table)
         policies = tbl.get("row_policies", {})
         if not policies:
@@ -1465,6 +1633,22 @@ def default_runner(argv, stdin=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def default_http(method, url, headers, body):
+    """One JSON request; returns (status, response text). An HTTP error
+    status is returned, not raised, so the caller can log and redact."""
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method=method)
+    for key, value in headers.items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return resp.status, resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", "replace")
+    except urllib.error.URLError as exc:
+        raise BackendError(f"{method} {url}: {exc.reason}")
+
+
 def parse_json_output(text):
     """The first JSON document in CLI output, or None when there is none.
 
@@ -1499,21 +1683,27 @@ def _flatten_bindings(policy):
 
 
 class LiveBackend(Backend):
-    """bq and gcloud CLI backend.
+    """bq and gcloud CLI backend, plus three Data Catalog REST calls.
 
     runner(argv, stdin) -> (returncode, stdout, stderr). The default runs
-    subprocess with UTF-8. Every mutating call records its argv (tokens
-    redacted) in the OperationLog. Written from the CLI documentation and
-    mock-tested; not live-tested in this repository.
+    subprocess with UTF-8. http(method, url, headers, body) -> (status,
+    text) serves create_taxonomy, create_policy_tag, and delete_taxonomy,
+    which gcloud cannot do; the default uses urllib with a token from
+    gcloud auth print-access-token. work_dir holds the schema and access
+    documents bq reads from files; make_backend puts it under the
+    workspace. Every call, failed ones included, records its argv or URL
+    (tokens redacted) in the OperationLog. Written from the CLI and API
+    documentation and mock-tested; not live-tested in this repository.
     """
 
     mode = "live"
 
     def __init__(self, project, location, runner=None, log=None,
-                 work_dir=None):
+                 work_dir=None, http=None):
         self.project = project
         self.location = location
         self.runner = runner
+        self.http = http
         self.log = log or OperationLog(None)
         self.work_dir = Path(work_dir) if work_dir else None
         self._file_seq = 0
@@ -1527,7 +1717,13 @@ class LiveBackend(Backend):
     def _run(self, argv, stdin=None):
         rc, out, err = self._call(argv, stdin)
         if rc != 0:
-            verb = " ".join(a for a in argv[1:3] if not a.startswith("--"))
+            entry = {"argv": redact_argv(argv), "rc": rc,
+                     "stderr": (err or "").strip()[:800],
+                     "stdout": (out or "").strip()[:800]}
+            if stdin:
+                entry["stdin"] = stdin[:800]
+            self.log.record("command_failed", **entry)
+            verb = next((a for a in argv[1:] if not a.startswith("--")), "")
             raise BackendError(
                 f"{argv[0]} {verb} failed ({rc}): {(err or out).strip()[:800]}")
         return out
@@ -1541,15 +1737,57 @@ class LiveBackend(Backend):
     def _query_argv(self):
         return self._bq("query", "--use_legacy_sql=false", "--nouse_cache")
 
-    def _taxonomies(self, *args, quiet=False):
-        argv = ["gcloud", "data-catalog", "taxonomies"] + list(args) + [
-            f"--project={self.project}"]
-        argv.append("--quiet" if quiet else "--format=json")
-        return argv
+    @property
+    def _dc_location(self):
+        """Data Catalog location ids are lower case (us, eu, us-central1)
+        even where the matching BigQuery location is written US or EU."""
+        return str(self.location).lower()
+
+    def _taxonomies(self, *args):
+        return ["gcloud", "data-catalog", "taxonomies"] + list(args) + [
+            f"--location={self._dc_location}", f"--project={self.project}",
+            "--format=json"]
+
+    def _access_token(self):
+        argv = ["gcloud", "auth", "print-access-token"]
+        rc, out, err = self._call(argv)
+        token = (out or "").strip().splitlines()[0].strip() \
+            if (out or "").strip() else ""
+        if rc != 0 or not token:
+            self.log.record("command_failed", argv=argv, rc=rc,
+                            stderr=(err or "").strip()[:800])
+            raise BackendError(
+                f"gcloud auth print-access-token failed ({rc}): "
+                f"{(err or '').strip()[:300]}")
+        return token
+
+    def _api_url(self, path):
+        return f"{DATACATALOG_API}/{path}"
+
+    def _datacatalog(self, method, path, body=None):
+        """One Data Catalog API call as the active gcloud account. The
+        token travels in a header only; responses are scrubbed of it
+        before they reach a log or an error."""
+        url = self._api_url(path)
+        token = self._access_token()
+        headers = {"Authorization": f"Bearer {token}",
+                   "Content-Type": "application/json; charset=utf-8",
+                   "Accept": "application/json"}
+        status, text = (self.http or default_http)(method, url, headers, body)
+        text = (text or "").replace(token, "<redacted>")
+        if not 200 <= int(status) < 300:
+            self.log.record("request_failed", method=method, url=url,
+                            body=body, status=status, response=text[:800])
+            raise BackendError(f"{method} {url} failed ({status}): {text[:800]}")
+        doc = parse_json_output(text)
+        return doc if isinstance(doc, dict) else {}
 
     def _work_file(self, stem, payload):
         if self.work_dir is None:
-            self.work_dir = Path(tempfile.mkdtemp(prefix="dbdrift-bq-"))
+            raise BackendError(
+                "LiveBackend needs work_dir to write schema and dataset "
+                "access documents for bq; make_backend sets "
+                "<workspace>/artifacts/bq-work")
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self._file_seq += 1
         path = self.work_dir / f"{stem}-{self._file_seq}.json"
@@ -1575,8 +1813,11 @@ class LiveBackend(Backend):
         self._run(argv)
         self.log.record("create_dataset", dataset=dataset, argv=argv)
 
+    def _ls(self, *args):
+        return self._bq("ls", f"--max_results={BQ_LS_MAX_RESULTS}", *args)
+
     def list_datasets(self):
-        items = parse_json_output(self._run(self._bq("ls", "--datasets")))
+        items = parse_json_output(self._run(self._ls("--datasets")))
         out = []
         for item in items if isinstance(items, list) else []:
             ref = item.get("datasetReference") or {}
@@ -1603,7 +1844,7 @@ class LiveBackend(Backend):
         return rows if isinstance(rows, list) else []
 
     def list_tables(self, dataset):
-        items = parse_json_output(self._run(self._bq("ls", self._ref(dataset))))
+        items = parse_json_output(self._run(self._ls(self._ref(dataset))))
         out = []
         for item in items if isinstance(items, list) else []:
             ref = item.get("tableReference") or {}
@@ -1692,7 +1933,9 @@ class LiveBackend(Backend):
         canon = _canonical_entry(entry)
         doc = self._show_dataset(dataset)
         access = list(doc.get("access") or [])
-        if canon in self._canonical_access(access):
+        present = {_access_key(e) for e in self._canonical_access(access)
+                   if "raw" not in e}
+        if _access_key(canon) in present:
             return
         access.append(self._access_to_bq(canon))
         doc["access"] = access
@@ -1728,31 +1971,43 @@ class LiveBackend(Backend):
 
     def add_project_binding(self, role, member):
         _check_member(member)
+        # --condition=None: gcloud otherwise prompts (and fails without a
+        # terminal) once the policy holds any conditional binding.
         argv = ["gcloud", "projects", "add-iam-policy-binding", self.project,
-                f"--member={member}", f"--role={role}", "--format=json"]
+                f"--member={member}", f"--role={role}", "--condition=None",
+                "--format=json"]
         self._run(argv)
         self.log.record("add_project_binding", role=role, member=member,
                         argv=argv)
 
     # ---- taxonomies and policy tags
 
+    def _taxonomy_name(self, taxonomy):
+        """Full resource name of a taxonomy given its name, a policy tag
+        under it, or a bare id."""
+        text = str(taxonomy).split("/policyTags/")[0].rstrip("/")
+        if text.startswith("projects/"):
+            return text
+        return (f"projects/{self.project}/locations/{self._dc_location}/"
+                f"taxonomies/{text}")
+
     def create_taxonomy(self, display_name, activated):
-        args = ["create", f"--display-name={display_name}",
-                f"--location={self.location}"]
+        parent = f"projects/{self.project}/locations/{self._dc_location}"
+        body = {"displayName": display_name}
         if activated:
-            args.append("--activated-policy-types=" + ",".join(activated))
-        argv = self._taxonomies(*args)
-        doc = parse_json_output(self._run(argv))
-        if not isinstance(doc, dict) or not doc.get("name"):
-            raise BackendError(
-                "gcloud data-catalog taxonomies create returned no name")
+            body["activatedPolicyTypes"] = list(activated)
+        doc = self._datacatalog("POST", f"{parent}/taxonomies", body)
+        if not doc.get("name"):
+            raise BackendError("taxonomies.create returned no name")
         self.log.record("create_taxonomy", name=doc["name"],
-                        displayName=display_name, argv=argv)
+                        displayName=display_name,
+                        activatedPolicyTypes=list(activated or []),
+                        request=f"POST {self._api_url(parent)}/taxonomies")
         return doc["name"]
 
     def describe_taxonomy(self, name):
         doc = parse_json_output(self._run(self._taxonomies(
-            "describe", self._taxonomy_id(name), f"--location={self.location}")))
+            "describe", self._taxonomy_id(name))))
         if not isinstance(doc, dict):
             raise BackendError(f"taxonomy {name} could not be described")
         return {"name": doc.get("name", name),
@@ -1760,36 +2015,35 @@ class LiveBackend(Backend):
                 "activatedPolicyTypes": list(doc.get("activatedPolicyTypes") or [])}
 
     def list_taxonomies(self):
-        items = parse_json_output(self._run(self._taxonomies(
-            "list", f"--location={self.location}")))
+        items = parse_json_output(self._run(self._taxonomies("list")))
         return [{"name": d.get("name"), "displayName": d.get("displayName", ""),
                  "activatedPolicyTypes": list(d.get("activatedPolicyTypes") or [])}
                 for d in (items if isinstance(items, list) else [])
                 if isinstance(d, dict)]
 
     def delete_taxonomy(self, name):
-        argv = self._taxonomies("delete", self._taxonomy_id(name),
-                                f"--location={self.location}", quiet=True)
-        self._run(argv)
-        self.log.record("delete_taxonomy", name=name, argv=argv)
+        _parse_taxonomy_name(name, self.project, self._dc_location)
+        self._datacatalog("DELETE", name)
+        self.log.record("delete_taxonomy", name=name,
+                        request=f"DELETE {self._api_url(name)}")
 
     def create_policy_tag(self, taxonomy, display_name, description=""):
-        args = ["policy-tags", "create", f"--taxonomy={self._taxonomy_id(taxonomy)}",
-                f"--location={self.location}", f"--display-name={display_name}"]
+        parent = self._taxonomy_name(taxonomy)
+        body = {"displayName": display_name}
         if description:
-            args.append(f"--description={description}")
-        argv = self._taxonomies(*args)
-        doc = parse_json_output(self._run(argv))
-        if not isinstance(doc, dict) or not doc.get("name"):
-            raise BackendError("policy-tags create returned no name")
+            body["description"] = description
+        doc = self._datacatalog("POST", f"{parent}/policyTags", body)
+        if not doc.get("name"):
+            raise BackendError("policyTags.create returned no name")
         self.log.record("create_policy_tag", name=doc["name"],
-                        displayName=display_name, argv=argv)
+                        displayName=display_name,
+                        request=f"POST {self._api_url(parent)}/policyTags")
         return doc["name"]
 
     def list_policy_tags(self, taxonomy):
         items = parse_json_output(self._run(self._taxonomies(
-            "policy-tags", "list", f"--taxonomy={self._taxonomy_id(taxonomy)}",
-            f"--location={self.location}")))
+            "policy-tags", "list",
+            f"--taxonomy={self._taxonomy_id(taxonomy)}")))
         return [{"name": d.get("name"), "displayName": d.get("displayName", ""),
                  "description": d.get("description", "")}
                 for d in (items if isinstance(items, list) else [])
@@ -1798,16 +2052,14 @@ class LiveBackend(Backend):
     def get_policy_tag_bindings(self, tag):
         policy = parse_json_output(self._run(self._taxonomies(
             "policy-tags", "get-iam-policy", self._tag_id(tag),
-            f"--taxonomy={self._taxonomy_id(tag)}",
-            f"--location={self.location}")))
+            f"--taxonomy={self._taxonomy_id(tag)}")))
         return _flatten_bindings(policy)
 
     def add_policy_tag_binding(self, tag, role, member):
         _check_member(member)
         argv = self._taxonomies(
             "policy-tags", "add-iam-policy-binding", self._tag_id(tag),
-            f"--taxonomy={self._taxonomy_id(tag)}",
-            f"--location={self.location}", f"--member={member}",
+            f"--taxonomy={self._taxonomy_id(tag)}", f"--member={member}",
             f"--role={role}")
         self._run(argv)
         self.log.record("add_policy_tag_binding", tag=tag, role=role,
@@ -1823,7 +2075,9 @@ class LiveBackend(Backend):
             raise BackendError(f"row access policy {name} names no principal")
         for m in members:
             _check_member(m)
-        grantees = ", ".join('"' + m.replace('"', '\\"') + '"' for m in members)
+        grantees = ", ".join(
+            '"' + m.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for m in members)
         sql = (f"CREATE OR REPLACE ROW ACCESS POLICY {name} ON "
                f"{_table_ref(self.project, dataset, table)} GRANT TO "
                f"({grantees}) FILTER USING ({filter_sql})")
@@ -1834,8 +2088,8 @@ class LiveBackend(Backend):
                         argv=argv, sql=sql)
 
     def list_row_policies(self, dataset, table):
-        items = parse_json_output(self._run(self._bq(
-            "ls", "--row_access_policies", self._ref(dataset, table))))
+        items = parse_json_output(self._run(self._ls(
+            "--row_access_policies", self._ref(dataset, table))))
         out = []
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
@@ -1948,8 +2202,17 @@ class LiveBackend(Backend):
 
 # ---------------------------------------------------------------- factory
 
+def check_migration_name(migration):
+    """The name becomes a directory under the tool home, so anything that
+    could climb out of it (.., a separator, an empty string) is refused."""
+    if not MIGRATION_NAME_RE.match(migration or ""):
+        raise BackendError(
+            f"migration name {migration!r} must match [A-Za-z0-9_-]+")
+    return migration
+
+
 def emulated_root(migration):
-    return pg.TOOLS_ROOT / "bq-emulated" / migration
+    return pg.TOOLS_ROOT / "bq-emulated" / check_migration_name(migration)
 
 
 def make_backend(bq_cfg, migration, workspace):
@@ -2000,15 +2263,29 @@ def main(argv):
     parser = argparse.ArgumentParser(prog="dbdrift.py bq-backend")
     parser.add_argument("--root", default=".",
                         help="project root holding migrations/")
-    parser.add_argument("--migration", required=True)
+    parser.add_argument("--migration", default=None)
     sub = parser.add_subparsers(dest="verb", required=True)
-    sub.add_parser("status", help="list datasets, tables, row policies, "
-                                  "and taxonomies as JSON")
-    p = sub.add_parser("reset", help="emulated only: delete the emulator "
-                                     "directory")
-    p.add_argument("--yes", action="store_true",
-                   help="confirm deletion of the emulator directory")
+    status_p = sub.add_parser(
+        "status", help="list datasets, tables, row policies, and taxonomies "
+                       "as JSON")
+    reset_p = sub.add_parser(
+        "reset", help="emulated only: delete the emulator directory")
+    reset_p.add_argument("--yes", action="store_true",
+                         help="confirm deletion of the emulator directory")
+    # --root and --migration are accepted before or after the verb.
+    for p in (status_p, reset_p):
+        p.add_argument("--root", default=argparse.SUPPRESS,
+                       help=argparse.SUPPRESS)
+        p.add_argument("--migration", default=argparse.SUPPRESS,
+                       help=argparse.SUPPRESS)
     args = parser.parse_args(argv[1:])
+    if args.migration is None:
+        parser.error("the following arguments are required: --migration")
+    try:
+        check_migration_name(args.migration)
+    except BackendError as exc:
+        print(f"BQ-BACKEND ERROR: {exc}", file=sys.stderr)
+        return 1
     try:
         mig = config.load_migration(args.root, args.migration)
         bq_cfg = config.bigquery_config(mig, args.migration)
@@ -2030,6 +2307,12 @@ def main(argv):
         if not args.yes:
             print(f"refusing to delete {root} without --yes", file=sys.stderr)
             return 2
+        # Belt and braces: never remove anything outside bq-emulated/.
+        base = (pg.TOOLS_ROOT / "bq-emulated").resolve()
+        if root.resolve().parent != base:
+            print(f"BQ-BACKEND ERROR: refusing to delete {root}; it is not "
+                  f"a child of {base}", file=sys.stderr)
+            return 1
         if root.exists():
             shutil.rmtree(root)
             print(f"removed {root}")

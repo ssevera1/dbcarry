@@ -93,17 +93,25 @@ validates each transition against the phase and gate table and appends to
 what ran and lets a gate be skipped.
 
 `scripts/hooks/guard_state.py`, wired as a PreToolUse hook in
-`.claude/settings.json`, enforces this. It exits 2 (blocking the call and
-explaining why on stderr) when an Edit, Write, MultiEdit, or NotebookEdit
-targets a `state.json` under a `migrations` directory, or when a Bash or
+`.claude/settings.json` for the Edit, Write, MultiEdit, NotebookEdit,
+Bash, and PowerShell tools, enforces this. It exits 2 (blocking the call
+and explaining why on stderr) when an Edit, Write, MultiEdit, or
+NotebookEdit targets a `state.json` under a `migrations` directory (the
+last path component is read the way Windows opens it, so trailing spaces
+or dots and a `::$DATA` stream suffix do not evade it), or when a Bash or
 PowerShell command mentions `state.json` and either redirects output into
-a state.json (`>`, `>>`, `>|`, `1>`, `2>`, `&>`, quoted or not) or
-contains `sed -i`, `Set-Content`, `Out-File`, `tee`, `rm`, `del`, or
-`Remove-Item` anywhere. The markers are over-inclusive on purpose: a
-command that removes a build directory and then reads a state.json is
-refused too, and the fix is to split it. Reads, `git`, the state CLI
-itself, and redirects that land elsewhere (`cat migrations/x/state.json
-2>>errors.log`) pass through. Bad or unexpected input allows the call
+a state.json (`>`, `>>`, `>|`, `1>`, `2>`, `&>`, or dd's `of=`; the target
+may mix quoted and bare segments such as `"$WS"/state.json`) or contains
+an in-place editor, copier, mover, writer, or deleter anywhere: `sed` with
+any in-place flag (`-i`, `-Ei`, `-i.bak`, `--in-place`, `-e ... -i`),
+`perl -i` in any cluster (`-pi`, `-i.bak`), `cp`, `mv`, `copy`, `move`,
+`rm`, `del`, `tee`, `truncate`, `Set-Content`, `Add-Content`,
+`Clear-Content`, `Out-File`, `Copy-Item`, `Move-Item`, or `Remove-Item`.
+The markers are over-inclusive on purpose: a command that removes a build
+directory and then reads a state.json is refused too, and the fix is to
+split it. Reads, `git`, the state CLI itself, redirects that land
+elsewhere (`cat migrations/x/state.json 2>>errors.log`), and sibling
+files such as `state.json.bak` pass through. Bad or unexpected input allows the call
 (exit 0) so the hook can never wedge a session. `decide(payload)` is
 pure and tested in `tests/test_hooks.py`; extend the tests before
 changing the rules. The hook is a guard against accidents, not a
