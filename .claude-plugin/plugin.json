@@ -1,5 +1,5 @@
 {
   "name": "db-drift",
-  "version": "0.1.0",
-  "description": "Agentic on-prem to cloud database migration pipeline with human approval gates"
+  "version": "0.2.0",
+  "description": "Agentic PostgreSQL to cloud migration pipeline with human approval gates. Adds a BigQuery target with security parity: source roles, grants, column privileges, and row-level security become verified IAM bindings, policy tags, and row access policies."
 }

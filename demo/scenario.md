@@ -30,4 +30,4 @@ order_items 300000, audit_log 50000.
 | app_ro loses table SELECT on customers and gets column SELECT on (id, full_name, created_at) | POST | restricted column customers.email; policy tag customers__email readable by app_rw only; app_ro keeps dataViewer on the table |
 | GRANT app_ro TO reporting | POST | membership flattening: reporting inherits app_ro's privileges and policies (audit_self applies to reporting too) |
 | ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_ro | POST | default privileges NOTE (no automatic dataset-wide binding, to avoid widening access) |
-| postgres is a superuser and owns every relation | initdb | bypass role: unmapped by default (WARNING), bypass row policies when mapped |
+| postgres is a superuser and owns every relation | initdb | bypass role: unmapped by default (INFO superuser_unmapped), dataOwner plus bypass row policies when mapped (WARNING superuser_mapped) |
