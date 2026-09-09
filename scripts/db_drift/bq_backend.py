@@ -23,6 +23,7 @@ redacted before anything is logged.
 """
 import argparse
 import collections
+import decimal
 import gzip
 import importlib
 import json
@@ -935,11 +936,13 @@ class EmulatedBackend(Backend):
         if not path.exists():
             return []
         rows = []
+        # Decimal keeps NUMERIC sums exact, the way BigQuery would; the
+        # predicate evaluator only touches STRING columns, so it is unaffected.
         with gzip.open(path, "rt", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if line:
-                    rows.append(json.loads(line))
+                    rows.append(json.loads(line, parse_float=decimal.Decimal))
         return rows
 
     # ---- lookups
