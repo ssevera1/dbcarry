@@ -108,15 +108,67 @@ Acceptance run of the emulated demo through cutover (every number below is
 from **emulated mode**, which proves pipeline logic and export fidelity,
 not BigQuery's behavior):
 
-<!-- acceptance results -->
-<!-- The orchestrating session replaces the marker above with the results
-of the real emulated run: the workspace name under sandbox/, per-phase
-timings, the exported and loaded count per table, the fingerprint compare
-verdict, the bq-security verify check count with enforcement_active, the
-probe count and verdict, and the cutover delta check; then one paragraph
-saying which subagents were dispatched, that both gates were presented in
-the main session, and that the run ended with a cutover against the
-emulator. Both comments are removed before the release commit. -->
+Workspace `sandbox/release/migrations/bq-demo`, run on 2026-09-09 against
+a freshly reseeded demo source (PostgreSQL 17.5, 655,000 rows). Phase
+timings from the decision log (all emulated):
+
+| Phase | Wall time | What happened |
+|---|---|---|
+| assess | 5 min 30 s | three subagents, principal-map template, schema translate: 0 WARNING, 3 INFO, 4 NOTE |
+| plan (Gate 1) | 1 min 34 s | bulk_load; 12 bindings, 1 policy tag, 5 row access policies, 1 authorized view; 0 items at review, no resolutions needed |
+| provision | 18 s | dataset `retail` created and read back (a stale emulator directory from an earlier sandbox run failed the first attempt; reset and re-run, both recorded in the decision log) |
+| migrate_schema | 22 s | 5 tables, 1 view, 1 materialized view applied; SCHEMA VERIFY PASSED (5 tables, 2 views) |
+| migrate_security | 29 s | 22 operations applied on empty tables; SECURITY VERIFY PASSED, 23 checks, enforcement_active true |
+| migrate_data | 43 s | `bq-load run`: 655,000 rows exported and loaded in 14.3 s |
+| validate | 6 min 1 s | migration-validator and security-validator in parallel; both verdicts PASSED |
+| cutover (Gate 2) | 1 min 8 s | quiesce, delta check, smoke fingerprints, staging removed |
+
+Exported and loaded per table (emulated; exported equals loaded on every
+row): audit_log 50,000; customers 100,000 (policy tag on `email` kept
+through the load); orders 200,000; products 5,000; order_items 300,000.
+
+Verification results (emulated):
+
+- Fingerprint compare (row count plus per-column aggregates on 22
+  columns, 71 metrics): match true on all 5 tables, nothing missing on
+  either side. The validator also proved the compare verb fails on a
+  mutated copy and compared all 655,000 stored rows with the export row
+  by row (0 differences).
+- `bq-security verify`: 23 checks passed, 0 failed, enforcement_active
+  true (taxonomy `dbdrift_bq-demo` activated for
+  FINE_GRAINED_ACCESS_CONTROL).
+- `bq-security probes --run`: 18 of 18 probes passed (15 row_count, 2
+  column_denied, 1 column_allowed, 0 unevaluable). reporting read 66,750
+  of 200,000 orders (source `region = 'eu'` count 66,750); app_ro read 0
+  orders (no policy names it, as on the source); app_ro and reporting
+  were denied `customers.email`; the two `SESSION_USER()` probes on
+  audit_log were reported, not compared (identity predicate). Every
+  attempted bypass (tagged column read, rows outside policy, unmapped
+  role with a binding, allUsers anywhere, authorized view, column_allowed
+  denied) found NO GAP.
+- Cutover delta check: source row count minus loaded count was 0 on all
+  5 tables after the quiesce; the cutover fingerprint compare matched on
+  all 5 tables.
+
+How the run was driven: the orchestrating Claude Code session executed
+each phase playbook in order and dispatched five subagents where the
+playbooks call for them (discovery-analyst, compatibility-checker, and
+security-analyst in assess; migration-validator and security-validator in
+validate). The sql-translator was not needed because nothing was flagged
+for review. Both gates were presented in the main session with the plan
+and the runbook; this being a sandbox run driven end to end on the
+operator's standing instruction, the decision log records both approvals
+as made by the orchestrating session. The run ended with a cutover against
+the emulator, which left the demo source read-only.
+
+The PostgreSQL-target security phase was proven in the same sitting in
+workspace `sandbox/release/migrations/pg-parity` (provider local,
+dump_restore, phases driven by script through migrate_data): after
+`security sync-roles` (7 statements) and the pre-data restore, `security
+diff` reported zero differences in roles, memberships, schema, relation
+(107 rows), and column (3 rows) privileges, with the 2 RLS flags and 4
+policies listed as missing exactly as the playbook predicts; after the
+post-data restore the same diff reported match true in every section.
 
 ## Security parity
 

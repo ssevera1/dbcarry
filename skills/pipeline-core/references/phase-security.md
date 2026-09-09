@@ -55,9 +55,11 @@ never claims parity for them.
      expected here whenever the source has RLS: pg_dump emits ENABLE
      ROW LEVEL SECURITY and CREATE POLICY in its post-data section, so
      after a pre-data restore the diff should list every RLS flag and
-     policy as missing. No recorded run in this repository backs that
-     expectation; the proof is migrate_data, which repeats this diff
-     after post-data and requires match true. List each missing entry
+     policy as missing. The v0.2.0 acceptance run recorded exactly that
+     on the demo source (2 rls flags and 4 policies missing after
+     pre-data, match true after post-data; see README); the proof for
+     any run is migrate_data, which repeats this diff after post-data
+     and requires match true. List each missing entry
      under "Deferred to post-data" in the report. A source without
      RLS gets match true and exit 0 right here.
    - unsynced_target_roles: informational. Roles the target has and the
