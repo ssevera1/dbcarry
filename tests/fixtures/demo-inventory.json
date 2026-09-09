@@ -1,0 +1,518 @@
+{
+  "server": {
+    "version": "17.5",
+    "wal_level": "logical",
+    "encoding": "UTF8"
+  },
+  "tables": [
+    {
+      "schema": "public",
+      "name": "audit_log",
+      "rows": 50000,
+      "bytes": 3702784,
+      "has_pk": false,
+      "replica_identity": "d"
+    },
+    {
+      "schema": "public",
+      "name": "customers",
+      "rows": 100000,
+      "bytes": 17973248,
+      "has_pk": true,
+      "replica_identity": "d"
+    },
+    {
+      "schema": "public",
+      "name": "order_items",
+      "rows": 300000,
+      "bytes": 25616384,
+      "has_pk": true,
+      "replica_identity": "d"
+    },
+    {
+      "schema": "public",
+      "name": "orders",
+      "rows": 200000,
+      "bytes": 25944064,
+      "has_pk": true,
+      "replica_identity": "d"
+    },
+    {
+      "schema": "public",
+      "name": "products",
+      "rows": 5000,
+      "bytes": 1130496,
+      "has_pk": true,
+      "replica_identity": "d"
+    }
+  ],
+  "sequences": [
+    {
+      "schema": "public",
+      "name": "customers_id_seq",
+      "last_value": 100000
+    },
+    {
+      "schema": "public",
+      "name": "orders_id_seq",
+      "last_value": 200000
+    },
+    {
+      "schema": "public",
+      "name": "products_id_seq",
+      "last_value": 5000
+    }
+  ],
+  "views": [
+    "public.recent_orders"
+  ],
+  "matviews": [
+    "public.sales_by_product"
+  ],
+  "extensions": [
+    {
+      "name": "hstore",
+      "version": "1.8"
+    },
+    {
+      "name": "plpgsql",
+      "version": "1.0"
+    }
+  ],
+  "roles": [
+    {
+      "name": "app_ro",
+      "can_login": true
+    },
+    {
+      "name": "app_rw",
+      "can_login": true
+    },
+    {
+      "name": "reporting",
+      "can_login": false
+    }
+  ],
+  "counts": {
+    "indexes": 8,
+    "constraints": 10
+  },
+  "columns": [
+    {
+      "schema": "public",
+      "table": "audit_log",
+      "name": "logged_at",
+      "ordinal": 1,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "audit_log",
+      "name": "actor",
+      "ordinal": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": true,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "audit_log",
+      "name": "action",
+      "ordinal": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": true,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "audit_log",
+      "name": "detail",
+      "ordinal": 4,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": true,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "customers",
+      "name": "id",
+      "ordinal": 1,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "customers",
+      "name": "email",
+      "ordinal": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "customers",
+      "name": "full_name",
+      "ordinal": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "customers",
+      "name": "created_at",
+      "ordinal": 4,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "order_id",
+      "ordinal": 1,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "product_id",
+      "ordinal": 2,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "quantity",
+      "ordinal": 3,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "nullable": false,
+      "default": null,
+      "precision": 32,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "unit_price_cents",
+      "ordinal": 4,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "nullable": false,
+      "default": null,
+      "precision": 32,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "id",
+      "ordinal": 1,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "customer_id",
+      "ordinal": 2,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "status",
+      "ordinal": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "ordered_at",
+      "ordinal": 4,
+      "data_type": "timestamp with time zone",
+      "udt_name": "timestamptz",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "region",
+      "ordinal": 5,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "id",
+      "ordinal": 1,
+      "data_type": "bigint",
+      "udt_name": "int8",
+      "nullable": false,
+      "default": null,
+      "precision": 64,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "sku",
+      "ordinal": 2,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "name",
+      "ordinal": 3,
+      "data_type": "text",
+      "udt_name": "text",
+      "nullable": false,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "price_cents",
+      "ordinal": 4,
+      "data_type": "integer",
+      "udt_name": "int4",
+      "nullable": false,
+      "default": null,
+      "precision": 32,
+      "scale": 0,
+      "max_length": null,
+      "element_type": null
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "attributes",
+      "ordinal": 5,
+      "data_type": "USER-DEFINED",
+      "udt_name": "hstore",
+      "nullable": true,
+      "default": null,
+      "precision": null,
+      "scale": null,
+      "max_length": null,
+      "element_type": null
+    }
+  ],
+  "primary_keys": [
+    {
+      "schema": "public",
+      "table": "customers",
+      "name": "customers_pkey",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "order_items_pkey",
+      "columns": [
+        "order_id",
+        "product_id"
+      ]
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "orders_pkey",
+      "columns": [
+        "id"
+      ]
+    },
+    {
+      "schema": "public",
+      "table": "products",
+      "name": "products_pkey",
+      "columns": [
+        "id"
+      ]
+    }
+  ],
+  "foreign_keys": [
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "order_items_order_id_fkey",
+      "columns": [
+        "order_id"
+      ],
+      "ref_schema": "public",
+      "ref_table": "orders",
+      "ref_columns": [
+        "id"
+      ]
+    },
+    {
+      "schema": "public",
+      "table": "order_items",
+      "name": "order_items_product_id_fkey",
+      "columns": [
+        "product_id"
+      ],
+      "ref_schema": "public",
+      "ref_table": "products",
+      "ref_columns": [
+        "id"
+      ]
+    },
+    {
+      "schema": "public",
+      "table": "orders",
+      "name": "orders_customer_id_fkey",
+      "columns": [
+        "customer_id"
+      ],
+      "ref_schema": "public",
+      "ref_table": "customers",
+      "ref_columns": [
+        "id"
+      ]
+    }
+  ],
+  "view_definitions": [
+    {
+      "schema": "public",
+      "name": "recent_orders",
+      "kind": "view",
+      "definition": " SELECT o.id, c.email, o.status, o.ordered_at FROM (orders o JOIN customers c ON ((c.id = o.customer_id))) WHERE (o.ordered_at > (now() - '90 days'::interval));"
+    },
+    {
+      "schema": "public",
+      "name": "sales_by_product",
+      "kind": "matview",
+      "definition": " SELECT p.id, p.sku, sum(oi.quantity) AS qty, sum((oi.quantity * oi.unit_price_cents)) AS revenue_cents FROM (order_items oi JOIN products p ON ((p.id = oi.product_id))) GROUP BY p.id, p.sku;"
+    }
+  ],
+  "view_dependencies": [
+    {
+      "view": "public.recent_orders",
+      "base": "public.customers"
+    },
+    {
+      "view": "public.recent_orders",
+      "base": "public.orders"
+    },
+    {
+      "view": "public.sales_by_product",
+      "base": "public.order_items"
+    },
+    {
+      "view": "public.sales_by_product",
+      "base": "public.products"
+    }
+  ]
+}

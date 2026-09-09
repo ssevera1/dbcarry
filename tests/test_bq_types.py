@@ -81,7 +81,7 @@ def test_identifiers_and_datasets():
 def test_export_expressions():
     assert t.export_expression(col("text", "text")) == '"c"'
     assert t.export_expression(col("bytea", "bytea")) \
-        == "encode(\"c\", 'base64')"
+        == "translate(encode(\"c\", 'base64'), E'\\n', '')"
     assert t.export_expression(col("USER-DEFINED", "hstore")) \
         == 'hstore_to_json("c")'
     assert t.export_expression(col("ARRAY", "_text", element_type="text")) \

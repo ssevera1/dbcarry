@@ -1,0 +1,1168 @@
+{
+  "roles": [
+    {
+      "name": "app_ro",
+      "can_login": true,
+      "superuser": false,
+      "inherit": true,
+      "bypass_rls": false,
+      "create_role": false,
+      "create_db": false,
+      "member_of": []
+    },
+    {
+      "name": "app_rw",
+      "can_login": true,
+      "superuser": false,
+      "inherit": true,
+      "bypass_rls": false,
+      "create_role": false,
+      "create_db": false,
+      "member_of": []
+    },
+    {
+      "name": "postgres",
+      "can_login": true,
+      "superuser": true,
+      "inherit": true,
+      "bypass_rls": true,
+      "create_role": true,
+      "create_db": true,
+      "member_of": []
+    },
+    {
+      "name": "reporting",
+      "can_login": false,
+      "superuser": false,
+      "inherit": true,
+      "bypass_rls": false,
+      "create_role": false,
+      "create_db": false,
+      "member_of": [
+        "app_ro"
+      ]
+    }
+  ],
+  "memberships": [
+    {
+      "member": "reporting",
+      "group": "app_ro",
+      "admin_option": false,
+      "inherit_option": true,
+      "set_option": true
+    }
+  ],
+  "schema_privileges": [
+    {
+      "schema": "pg_temp_97",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "CREATE",
+      "grantable": false
+    },
+    {
+      "schema": "pg_temp_97",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "pg_toast_temp_97",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "CREATE",
+      "grantable": false
+    },
+    {
+      "schema": "pg_toast_temp_97",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "owner": "pg_database_owner",
+      "grantee": "PUBLIC",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "owner": "pg_database_owner",
+      "grantee": "pg_database_owner",
+      "privilege": "CREATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "owner": "pg_database_owner",
+      "grantee": "pg_database_owner",
+      "privilege": "USAGE",
+      "grantable": false
+    }
+  ],
+  "relation_privileges": [
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "customers_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "order_items",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products",
+      "kind": "table",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "products_id_seq",
+      "kind": "sequence",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "USAGE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "recent_orders",
+      "kind": "view",
+      "owner": "postgres",
+      "grantee": "reporting",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "app_ro",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "app_rw",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "DELETE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "INSERT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "MAINTAIN",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "REFERENCES",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "SELECT",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRIGGER",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "TRUNCATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "postgres",
+      "privilege": "UPDATE",
+      "grantable": false
+    },
+    {
+      "schema": "public",
+      "relation": "sales_by_product",
+      "kind": "matview",
+      "owner": "postgres",
+      "grantee": "reporting",
+      "privilege": "SELECT",
+      "grantable": false
+    }
+  ],
+  "column_privileges": [
+    {
+      "schema": "public",
+      "relation": "customers",
+      "column": "created_at",
+      "grantee": "app_ro",
+      "privilege": "SELECT"
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "column": "full_name",
+      "grantee": "app_ro",
+      "privilege": "SELECT"
+    },
+    {
+      "schema": "public",
+      "relation": "customers",
+      "column": "id",
+      "grantee": "app_ro",
+      "privilege": "SELECT"
+    }
+  ],
+  "rls": [
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "enabled": true,
+      "forced": false
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "enabled": true,
+      "forced": false
+    }
+  ],
+  "policies": [
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "name": "audit_all_rw",
+      "command": "ALL",
+      "permissive": true,
+      "roles": [
+        "app_rw"
+      ],
+      "using": "true",
+      "with_check": null
+    },
+    {
+      "schema": "public",
+      "relation": "audit_log",
+      "name": "audit_self",
+      "command": "SELECT",
+      "permissive": true,
+      "roles": [
+        "app_ro"
+      ],
+      "using": "(actor = CURRENT_USER)",
+      "with_check": null
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "name": "orders_all_rw",
+      "command": "ALL",
+      "permissive": true,
+      "roles": [
+        "app_rw"
+      ],
+      "using": "true",
+      "with_check": null
+    },
+    {
+      "schema": "public",
+      "relation": "orders",
+      "name": "orders_region_eu",
+      "command": "SELECT",
+      "permissive": true,
+      "roles": [
+        "reporting"
+      ],
+      "using": "(region = 'eu'::text)",
+      "with_check": null
+    }
+  ],
+  "default_privileges": [
+    {
+      "for_role": "postgres",
+      "schema": "public",
+      "object_type": "table",
+      "grantee": "app_ro",
+      "privilege": "SELECT"
+    }
+  ],
+  "security_barrier_views": []
+}

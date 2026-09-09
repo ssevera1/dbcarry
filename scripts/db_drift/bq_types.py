@@ -157,7 +157,9 @@ def export_expression(column):
     if data_type == "array" or udt.startswith("_"):
         return f"to_json({col})"
     if udt == "bytea":
-        return f"encode({col}, 'base64')"
+        # encode(..., 'base64') follows RFC 2045 and breaks lines every 76
+        # characters; BigQuery expects one unbroken base64 string.
+        return f"translate(encode({col}, 'base64'), E'\\n', '')"
     if udt == "hstore":
         return f"hstore_to_json({col})"
     if udt in JSON_NATIVE_UDT:
