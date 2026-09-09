@@ -154,7 +154,14 @@ def export_expression(column):
     col = quote_pg(column["name"])
     data_type = (column.get("data_type") or "").lower().strip()
     udt = (column.get("udt_name") or "").lower().strip()
+    element = (column.get("element_type") or "").lower().strip()
     if data_type == "array" or udt.startswith("_"):
+        if element == "bytea" or udt == "_bytea":
+            # to_json renders each bytea element as hex text, which bq
+            # load rejects for ARRAY<BYTES>; encode every element the
+            # way a scalar bytea is exported instead.
+            return (f"(SELECT to_json(array_agg(translate(encode(e, "
+                    f"'base64'), E'\\n', ''))) FROM unnest({col}) e)")
         return f"to_json({col})"
     if udt == "bytea":
         # encode(..., 'base64') follows RFC 2045 and breaks lines every 76

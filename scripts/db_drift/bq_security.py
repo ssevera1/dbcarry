@@ -127,6 +127,68 @@ def _paren(sql):
     return s if _is_wrapped(s) else f"({s})"
 
 
+def filter_sql_problem(sql):
+    """None when sql is one balanced expression, else a short reason.
+
+    Quote-aware (single, double, and backtick quoted runs are skipped,
+    doubled quotes inside them included) and comment-aware (-- to end of
+    line, /* */). A semicolon outside quotes, a parenthesis that closes
+    more than were opened, or an unclosed parenthesis or quote is a
+    problem. The backend's own check runs as well when it exists.
+    """
+    text = str(sql or "")
+    if not text.strip():
+        return "empty"
+    depth = 0
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in ("'", '"', "`"):
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == ch:
+                    if j + 1 < n and text[j + 1] == ch:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            if j >= n:
+                return "unclosed quote"
+            i = j + 1
+            continue
+        if text.startswith("--", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j + 1
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            if j < 0:
+                return "unclosed comment"
+            i = j + 2
+            continue
+        if ch == ";":
+            return "semicolon outside a string"
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return "a parenthesis closes more than were opened"
+        i += 1
+    if depth != 0:
+        return "unbalanced parentheses"
+    check = getattr(bq_backend, "check_filter_sql", None)
+    if check is not None:
+        try:
+            check(text)
+        except Exception as exc:   # BackendError or SqlSyntaxError
+            return str(exc)
+    return None
+
+
 def combine_predicates(permissive, restrictive):
     """PostgreSQL policy combination: (p1 OR p2 ...) AND r1 AND r2 ...
 
@@ -150,11 +212,31 @@ def combine_predicates(permissive, restrictive):
     return head + "".join(f" AND {_paren(r)}" for r in restr)
 
 
+_PRINCIPAL_VALUE_RE = re.compile(r"^[A-Za-z0-9._%+@:?=/-]+$")
+_EMAIL_KINDS = ("user", "group", "serviceAccount", "domain")
+
+
 def _check_principal(label, member):
     try:
         bq_backend._check_member(member)
     except bq_backend.BackendError as exc:
         raise SecurityPlanError(f"{label}: {exc}")
+    value = str(member).partition(":")[2]
+    if not _PRINCIPAL_VALUE_RE.match(value):
+        raise SecurityPlanError(
+            f"{label}: principal {member!r} contains a character outside "
+            "letters, digits, and . _ % + @ : ? = / -")
+
+
+def canonical_principal(member):
+    """One spelling per principal: IAM compares the address of a user,
+    group, service account, or domain without case, so two case variants
+    of one address are one principal here too and share one set of
+    bindings (and one principal_shared note)."""
+    kind, sep, value = str(member or "").partition(":")
+    if sep and kind in _EMAIL_KINDS:
+        return f"{kind}:{value.lower()}"
+    return str(member or "")
 
 
 def _memberships(security_inv):
@@ -367,7 +449,7 @@ def public_privileges(security_inv):
     return entry
 
 
-def readable_columns(eff, inventory):
+def readable_columns(eff, inventory, public=None):
     """{"schema.table": {role: set(columns)}} (spec 7.3).
 
     Every column when the role has table SELECT, otherwise the columns
@@ -381,11 +463,20 @@ def readable_columns(eff, inventory):
     cols_by_table = columns_index(inventory)
     keys = [_key(t["schema"], t["name"]) for t in inventory.get("tables", [])]
     keys += [k for k in cols_by_table if k not in keys]
+    readers = dict(eff)
+    if public is not None:
+        # a public principal reads exactly what PUBLIC was granted, so
+        # PUBLIC takes part in the restricted-column computation as a
+        # reader of its own (spec 7.3): a column-level PUBLIC grant must
+        # never become a full table read for that principal
+        readers["PUBLIC"] = {"relations": public.get("relations", {}),
+                             "columns": public.get("columns", {}),
+                             "superuser": False}
     out = {}
     for key in keys:
         names = [c["name"] for c in cols_by_table.get(key, [])]
         per_role = {}
-        for role, e in eff.items():
+        for role, e in readers.items():
             if e.get("superuser"):
                 continue
             if "SELECT" in e["relations"].get(key, set()):
@@ -443,8 +534,10 @@ class _Planner:
         self.masking = (bq_cfg.get("column_security") or "") == MASKING_MODE
         if self.admin:
             _check_principal("admin_principal", self.admin)
+            self.admin = canonical_principal(self.admin)
         if self.public_principal:
             _check_principal("public_principal", self.public_principal)
+            self.public_principal = canonical_principal(self.public_principal)
         self.resolutions = (resolutions or {}).get("policies") or {}
         _require_columns(inventory)
         self.server_version = _inventory_version(inventory)
@@ -485,11 +578,12 @@ class _Planner:
             if not principal:
                 continue
             _check_principal(f"principal map: role {name}", principal)
-            self.principals[name] = principal
+            self.principals[name] = canonical_principal(principal)
             self.probe_sa[name] = str(
                 (entry or {}).get("probe_service_account") or "")
 
-        self.readable = readable_columns(self.eff, inventory)
+        self.readable = readable_columns(
+            self.eff, inventory, self.public if self.public_principal else None)
         self.restricted = restricted_columns(self.readable, inventory)
         self.rls_tables = {
             _key(r["schema"], r["relation"]): r
@@ -592,6 +686,20 @@ class _Planner:
                 continue
             cols = eff_entry["columns"][key]
             selectable = sorted(c for c, p in cols.items() if "SELECT" in p)
+            known = [c["name"] for c in self.columns.get(key, [])]
+            if rel["kind"] == "table" and known:
+                unknown = [c for c in selectable if c not in known]
+                if unknown:
+                    self.finding(
+                        "WARNING", "column_grant_unknown_column",
+                        f"{key}/{role}",
+                        f"{role} holds column-level SELECT on "
+                        f"{', '.join(unknown)} of {key}, which the "
+                        "inventory does not list; no binding is derived "
+                        "from a column the plan cannot protect with a tag",
+                        "take inventory.json and security.json at the same "
+                        "time, or check the column names")
+                    selectable = [c for c in selectable if c in known]
             for col in sorted(cols):
                 writes = cols[col] & WRITE_PRIVS
                 if writes:
@@ -625,9 +733,11 @@ class _Planner:
                     reasons[key] = (f"column SELECT on {key} ({listed}); the "
                                     "restricted columns of the table carry a "
                                     "policy tag")
-                else:
+                elif known and set(selectable) == set(known):
                     reasons[key] = (f"column SELECT on {key} ({listed}), "
                                     "which covers every column")
+                else:
+                    reasons[key] = f"column SELECT on {key} ({listed})"
         if view_writes:
             self.finding("INFO", "view_write_unmapped", role,
                          f"{role} holds write privileges on "
@@ -954,7 +1064,10 @@ class _Planner:
                 used.add(name)
                 readers = []
                 for role in sorted(allowed):
-                    if self.mapped(role):
+                    if role == "PUBLIC":
+                        readers.append({"member": self.public_principal,
+                                        "source_role": "PUBLIC"})
+                    elif self.mapped(role):
                         readers.append({"member": self.principals[role],
                                         "source_role": role})
                     elif not self.is_superuser(role):
@@ -995,6 +1108,42 @@ class _Planner:
 
     # ---- row policies
 
+    def resolution_problem(self, resolution, res_sql, pol):
+        """Why a recorded resolution cannot be applied, as (code, message,
+        action), or None when it can. A resolution needs a rationale (Gate
+        1 shows it), must be written against the predicate the source has
+        now (source_sql, when the agent recorded it, must equal the
+        current USING clause), and must be one balanced boolean
+        expression: the live backend hands the filter to bq query, which
+        runs scripts, so a stray parenthesis or semicolon would execute
+        whatever follows it."""
+        rationale = str(resolution.get("rationale") or "").strip()
+        name = pol["name"]
+        if not rationale:
+            return ("translation_resolution_unjustified",
+                    f"the resolution for policy {name} has no rationale; "
+                    "it stays at review",
+                    "have the sql-translator state why the text keeps the "
+                    "source semantics")
+        recorded = resolution.get("source_sql")
+        if recorded is not None and \
+                _normalize_ws(str(recorded)) != _normalize_ws(pol.get("using") or ""):
+            return ("translation_resolution_stale",
+                    f"the resolution for policy {name} was written against "
+                    f"the predicate {str(recorded).strip()}, but the source "
+                    f"now has {str(pol.get('using') or '').strip()}; it "
+                    "stays at review",
+                    "re-run the sql-translator against the current review "
+                    "file")
+        why = filter_sql_problem(res_sql)
+        if why is not None:
+            return ("translation_resolution_malformed",
+                    f"the resolution for policy {name} is not one balanced "
+                    f"boolean expression ({why}); it stays at review",
+                    "return a single expression with balanced parentheses "
+                    "and no semicolon")
+        return None
+
     def translate_policy(self, key, pol):
         """Translate one source policy's USING clause once per table."""
         cache_key = (key, pol["name"])
@@ -1012,18 +1161,39 @@ class _Planner:
                  "confidence": result["confidence"],
                  "notes": list(result["notes"])}
         resolution = self.resolutions.get(ref) or {}
-        if resolution.get("sql"):
-            entry["sql"] = str(resolution["sql"]).strip()
-            entry["confidence"] = "resolved"
-            rationale = str(resolution.get("rationale") or "").strip()
-            entry["notes"].append(
-                "resolved by the sql-translator agent"
-                + (f": {rationale}" if rationale else ""))
-            self.finding("NOTE", "translation_resolved", ref,
-                         f"the predicate of policy {pol['name']} on {key} "
-                         f"uses the recorded resolution: {entry['sql']}",
-                         "confirm the rationale at Gate 1")
-        elif entry["confidence"] == "review":
+        if not isinstance(resolution, dict):
+            raise SecurityPlanError(
+                f"translation-resolutions.json entry for {ref} must be an "
+                f"object with sql and rationale, not "
+                f"{type(resolution).__name__}")
+        res_sql = str(resolution.get("sql") or "").strip()
+        if res_sql and entry["confidence"] != "review":
+            self.finding(
+                "WARNING", "translation_resolution_ignored", ref,
+                f"translation-resolutions.json carries a resolution for "
+                f"policy {pol['name']} on {key}, but its predicate "
+                f"translated automatically ({entry['sql']}); a resolution "
+                "replaces only a review-flagged translation, so the "
+                "recorded one is ignored",
+                "remove the entry, or change the source policy if the "
+                "automatic translation is wrong")
+        elif res_sql:
+            problem = self.resolution_problem(resolution, res_sql, pol)
+            if problem is not None:
+                code, message, action = problem
+                self.finding("WARNING", code, ref, message, action)
+            else:
+                entry["sql"] = res_sql
+                entry["confidence"] = "resolved"
+                rationale = str(resolution.get("rationale") or "").strip()
+                entry["notes"].append(
+                    "resolved by the sql-translator agent: " + rationale)
+                self.finding("NOTE", "translation_resolved", ref,
+                             f"the predicate of policy {pol['name']} on "
+                             f"{key} uses the recorded resolution: "
+                             f"{entry['sql']}",
+                             "confirm the rationale at Gate 1")
+        if entry["confidence"] == "review":
             # the finding waits for build_row_policies: it is a blocking
             # WARNING only when an emitted policy carries the predicate
             self.review_refs.setdefault(ref, {
@@ -1102,6 +1272,15 @@ class _Planner:
                            " (its USING clause is still mapped for reads)"),
                         "enforce the write-side rule in the loading pipeline "
                         "or the application")
+            if self.public_principal and "PUBLIC" in self.readable.get(key, {}):
+                self.finding(
+                    "INFO", "public_rls_denied", key,
+                    f"PUBLIC holds SELECT on {key}, which has row-level "
+                    f"security; row access policies are written per source "
+                    f"role only, so {self.public_principal} receives none "
+                    "and sees no rows of this table on the target",
+                    "map the users behind PUBLIC to roles, or accept that "
+                    "the public principal reads nothing here")
             table_policies = []
             for role in sorted(self.roles):
                 if self.is_superuser(role):
@@ -1563,8 +1742,10 @@ def render_apply_scripts(plan, bq_cfg):
     table_b = [b for b in plan["bindings"] if b["scope"] == "table"]
     iam.append("# --- project bindings")
     for b in project_b:
-        iam.append(f"gcloud projects add-iam-policy-binding {project} "
-                   f"--member={b['member']} --role={b['role']} "
+        iam.append(f"gcloud projects add-iam-policy-binding "
+                   f"{_sh_quote(project)} "
+                   f"--member={_sh_quote(b['member'])} "
+                   f"--role={_sh_quote(b['role'])} "
                    f"--condition=None   # {b['source_role']}: {b['reason']}")
     iam.append("")
     iam.append("# --- dataset access entries (bq has no add-access verb: show, "
@@ -1590,10 +1771,12 @@ def render_apply_scripts(plan, bq_cfg):
     iam.append("")
     iam.append("# --- table and view bindings")
     for b in table_b:
-        iam.append(f"bq --project_id={project} add-iam-policy-binding "
-                   f"--member={b['member']} --role={b['role']} "
-                   f"{project}:{b['resource']}   # {b['source_role']}: "
-                   f"{b['reason']}")
+        iam.append(f"bq --project_id={_sh_quote(project)} "
+                   f"add-iam-policy-binding "
+                   f"--member={_sh_quote(b['member'])} "
+                   f"--role={_sh_quote(b['role'])} "
+                   f"{_sh_quote(project + ':' + b['resource'])}   "
+                   f"# {b['source_role']}: {b['reason']}")
     out["30-iam.sh"] = "\n".join(iam) + "\n"
 
     tags = list(head)
@@ -1629,7 +1812,8 @@ def render_apply_scripts(plan, bq_cfg):
                 f"gcloud data-catalog taxonomies policy-tags "
                 f"add-iam-policy-binding \"${{{var}##*/}}\" "
                 f"--taxonomy=\"${{TAXONOMY_ID}}\" --location={dc_location} "
-                f"--project={project} --member={reader['member']} "
+                f"--project={_sh_quote(project)} "
+                f"--member={_sh_quote(reader['member'])} "
                 f"--role={ROLE_FGR}   # {reader['source_role']}")
         by_table = {}
         for col in tag["columns"]:
@@ -1669,7 +1853,7 @@ def render_apply_scripts(plan, bq_cfg):
                    f"source policies {sources}; confidence {pol['confidence']}")
         for note in pol["notes"]:
             sql.append(f"--   note: {_normalize_ws(note)}")
-        if pol["confidence"] == "review":
+        if pol["confidence"] not in APPLIABLE_CONFIDENCES:
             sql.append("-- REVIEW: not applied until resolved")
             sql.append("-- " + stmt)
         else:
@@ -1855,10 +2039,45 @@ def _table_field(fields, column):
     return None
 
 
+APPLIABLE_CONFIDENCES = ("auto", "resolved")
+KNOWN_CONFIDENCES = APPLIABLE_CONFIDENCES + ("review",)
+
+
+def check_plan(plan):
+    """Raise SecurityPlanError when a plan artifact carries a row policy
+    confidence outside auto, resolved, review: apply and the renderers
+    trust only those two spellings that mean applicable."""
+    for p in plan.get("row_policies", []):
+        c = p.get("confidence")
+        if c not in KNOWN_CONFIDENCES:
+            raise SecurityPlanError(
+                f"row policy {p.get('name')} on {p.get('dataset')}."
+                f"{p.get('table')} has confidence {c!r}; the plan accepts "
+                f"only {', '.join(KNOWN_CONFIDENCES)}; re-run bq-security "
+                "plan")
+
+
+def refuse_open_tables(plan):
+    """Raise SecurityPlanError when the plan leaves an RLS table without
+    any row access policy (finding rls_deny_all_unassigned): a table with
+    no policy is open to every reader, which apply must not create."""
+    open_tables = [f["subject"] for f in plan.get("findings", [])
+                   if f.get("code") == "rls_deny_all_unassigned"]
+    if open_tables:
+        raise SecurityPlanError(
+            "refusing to apply: rls_deny_all_unassigned on "
+            f"{', '.join(open_tables)} (a row-level security table would "
+            "get no row access policy and be open to every reader); set "
+            "bigquery.admin_principal or map the roles, then re-run "
+            "bq-security plan")
+
+
 def refuse_unresolved(plan):
-    """Raise SecurityPlanError naming every row policy still at review."""
+    """Raise SecurityPlanError naming every row policy whose confidence is
+    not one of the two that mean applicable (auto, resolved): review, and
+    any other spelling, blocks apply."""
     review = [p for p in plan.get("row_policies", [])
-              if p.get("confidence") == "review"]
+              if p.get("confidence") not in APPLIABLE_CONFIDENCES]
     if not review:
         return
     items = []
@@ -1867,7 +2086,8 @@ def refuse_unresolved(plan):
                 for s in p.get("source_policies", [])
                 if s.get("confidence") == "review"]
         items.append(f"{p['name']} on {p['dataset']}.{p['table']} "
-                     f"(source: {', '.join(refs) or 'unknown'})")
+                     f"(confidence {p.get('confidence')!r}; source: "
+                     f"{', '.join(refs) or 'unknown'})")
     raise SecurityPlanError(
         f"refusing to apply: {len(review)} row access policies need review "
         "by the sql-translator agent: " + "; ".join(items))
@@ -1887,6 +2107,7 @@ def apply_plan(plan, backend, log=None):
     "ops"} and records the same under plan["applied"].
     """
     refuse_unresolved(plan)
+    refuse_open_tables(plan)
     ops = 0
     if log:
         log.record("security_apply_start", migration=plan.get("migration"),
@@ -2010,6 +2231,88 @@ class _ReadBack:
         return self.cache[key]
 
 
+def _is_everyone(member):
+    kind, _, value = str(member or "").partition(":")
+    forbidden = {m.lower() for m in bq_backend.FORBIDDEN_MEMBERS}
+    return str(member or "").lower() in forbidden or value.lower() in forbidden
+
+
+def _verify_extras(plan, backend, rb, check):
+    """Bindings the plan does not name, read back from the target.
+
+    Tables and datasets the pipeline created are pipeline-owned, so a
+    data read role there for an unplanned member fails with expected
+    "absent" (table_binding_extra, dataset_access_extra), and so does an
+    authorized view the plan does not list (authorized_view_extra). Two
+    dataset entries are not extras: the three project special groups
+    that BigQuery adds to every new dataset, and, in live mode only, a
+    dataOwner entry for a user or service account, which is the identity
+    that created the dataset (reported as a passing
+    dataset_owner_identity check so the validator sees it; in emulated
+    mode nothing creates such an entry, so it is an extra). The project
+    IAM policy is not pipeline-owned: only an everyone-principal there
+    (allUsers, allAuthenticatedUsers) fails, as project_binding_extra.
+    """
+    planned = set()
+    for b in plan.get("bindings", []):
+        planned.add((b["scope"], b["resource"], b["role"],
+                     _member_key(b["member"])))
+    planned_views = {(av["dataset"], av["view"])
+                     for av in plan.get("authorized_views", [])}
+    live = (plan.get("mode") or "emulated") == "live"
+    special = {f"specialgroup:{g.lower()}" for g in
+               bq_backend.PROJECT_SPECIAL_GROUPS}
+
+    rows = rb.get("project", backend.get_project_bindings)
+    for r in ([] if isinstance(rows, str) else rows):
+        if _is_everyone(r.get("member")):
+            check(f"project_binding_extra:{r.get('role')}:{r.get('member')}",
+                  "absent", "present", False)
+
+    datasets = sorted(set(plan.get("datasets", {}))
+                      | {b["resource"] for b in plan.get("bindings", [])
+                         if b["scope"] == "dataset"}
+                      | {av["dataset"] for av in plan.get("authorized_views", [])})
+    for dataset in datasets:
+        rows = rb.get("dataset", backend.get_dataset_access, dataset)
+        for e in ([] if isinstance(rows, str) else rows):
+            if "view" in e:
+                if (dataset, e["view"]) not in planned_views:
+                    check(f"authorized_view_extra:{dataset}:{e['view']}",
+                          "absent", "present", False)
+                continue
+            role, member = e.get("role"), e.get("member", "")
+            if role not in bq_backend.DATA_READ_ROLES:
+                continue
+            if ("dataset", dataset, role, _member_key(member)) in planned:
+                continue
+            kind, _, value = str(member).partition(":")
+            if _is_everyone(member):
+                pass
+            elif f"{kind.lower()}:{value.lower()}" in special:
+                continue
+            elif live and role == ROLE_OWNER and \
+                    _member_key(member)[0] == "userByEmail":
+                check(f"dataset_owner_identity:{dataset}:{member}",
+                      "migration identity (not planned)", "present", True)
+                continue
+            check(f"dataset_access_extra:{dataset}:{role}:{member}",
+                  "absent", "present", False)
+        tables = rb.get("tables", backend.list_tables, dataset)
+        for t in ([] if isinstance(tables, str) else tables):
+            table = t["name"] if isinstance(t, dict) else str(t)
+            rows = rb.get("table", backend.get_table_bindings, dataset, table)
+            for r in ([] if isinstance(rows, str) else rows):
+                role, member = r.get("role"), r.get("member", "")
+                if role not in bq_backend.DATA_READ_ROLES:
+                    continue
+                resource = f"{dataset}.{table}"
+                if ("table", resource, role, _member_key(member)) in planned:
+                    continue
+                check(f"table_binding_extra:{resource}:{role}:{member}",
+                      "absent", "present", False)
+
+
 def verify_plan(plan, backend):
     """Read every planned control back through the backend.
 
@@ -2063,6 +2366,7 @@ def verify_plan(plan, backend):
         else:
             ok = any(e.get("view") == av["view"] for e in rows)
             check(name, "present", "present" if ok else "missing", ok)
+    _verify_extras(plan, backend, rb, check)
 
     enforcement_active = True
     tags = plan.get("policy_tags", [])
@@ -2238,9 +2542,11 @@ def _row_expectation(member, table_sql, is_rls, table_policies):
     a table the role reads on the source.
 
     The status is always ok. On an RLS table the plan's row policies
-    naming the member decide: none at all on the table (nothing could be
-    written) means every row, none naming the member means zero rows, a
-    TRUE filter means the whole table, and otherwise the ORIGINAL source
+    naming the member decide: none naming the member means zero rows
+    (also when the plan writes no policy for the table at all: the
+    member holds no permissive source policy, so zero is the source
+    truth and a table left open fails its probes), a TRUE filter means
+    the whole table, and otherwise the ORIGINAL source
     predicates of the policies are combined for the PostgreSQL count.
     That holds for resolved and review predicates too: the resolution
     changes the target filter, and the source predicate stays the ground
@@ -2249,11 +2555,6 @@ def _row_expectation(member, table_sql, is_rls, table_policies):
     """
     if not is_rls:
         return _expected("ok", table_sql)
-    if not table_policies:
-        return _expected(
-            "ok", None, None,
-            "RLS table without any row access policy in the plan: BigQuery "
-            "shows every row (see the plan's rls_deny_all findings)")
     mine = [p for p in table_policies if member in (p.get("members") or [])]
     if not mine:
         return _expected(
@@ -2335,7 +2636,7 @@ def probe_set(plan, security_inv, inventory, principal_map, bq_cfg):
     roles = {r["name"]: r for r in security_inv.get("roles", [])}
     probes = []
     for role, entry in sorted((principal_map or {}).get("roles", {}).items()):
-        principal = str((entry or {}).get("principal") or "")
+        principal = canonical_principal((entry or {}).get("principal") or "")
         probe_sa = str((entry or {}).get("probe_service_account") or "")
         if not principal or role not in roles:
             continue
@@ -2496,9 +2797,11 @@ def _load_context(args):
 
 
 def _load_plan(art):
-    return _load_json_artifact(
+    plan = _load_json_artifact(
         art / PLAN_FILE, "security plan", "bindings",
         "run bq-security plan first")
+    check_plan(plan)
+    return plan
 
 
 def _load_inputs(art):
@@ -2533,6 +2836,14 @@ def _cmd_plan(args, bq_cfg, ws):
         resolutions = json.loads(res_path.read_text(encoding="utf-8"))
         if not isinstance(resolutions, dict):
             raise SecurityPlanError(f"{res_path} must hold a JSON object")
+        for section in ("views", "policies"):
+            value = resolutions.get(section)
+            if value is not None and not isinstance(value, dict):
+                raise SecurityPlanError(
+                    f"{res_path}: {section} must be a JSON object keyed "
+                    "by the review item (schema.name for views, "
+                    "schema.table/policy for policies), not "
+                    f"{type(value).__name__}")
     plan = plan_security(sec, inv, bq_cfg, pmap, resolutions)
     _write_json(art / PLAN_FILE, plan)
     _write_text(art / PLAN_MD, render_plan_markdown(plan))
@@ -2621,7 +2932,7 @@ def _cmd_probes(args, mig, bq_cfg, ws):
     probes = probe_set(plan, sec, inv, pmap, bq_cfg)
     doc = {"mode": bq_cfg["mode"], "migration": args.migration,
            "ran": False, "pass": None, "skipped": not probes,
-           "probes": probes}
+           "source_compared": None, "probes": probes}
     if not args.run:
         _write_json(art / PROBES_FILE, doc)
         print(f"wrote {art / PROBES_FILE} ({len(probes)} probes; add --run "
@@ -2646,6 +2957,7 @@ def _cmd_probes(args, mig, bq_cfg, ws):
     doc["ran"] = True
     doc["mode"] = backend.mode
     doc["pass"] = ok
+    doc["source_compared"] = pg_ci is not None
     doc["probes"] = results
     _write_json(art / PROBES_FILE, doc)
     passed = sum(1 for r in results if r["pass"])
@@ -2660,7 +2972,9 @@ def _cmd_probes(args, mig, bq_cfg, ws):
                   f"({r['actual']['reason']})"
                   + (f"; {note}" if r["expected"]["status"] == "error" else ""))
     verdict = "PASSED" if ok else "FAILED"
-    print(f"SECURITY PROBES {verdict} ({backend.mode}): {passed} of "
+    label = backend.mode + ("" if pg_ci is not None
+                            else ", status only, counts not compared")
+    print(f"SECURITY PROBES {verdict} ({label}): {passed} of "
           f"{len(results)} probes; wrote {art / PROBES_FILE}")
     return 0 if ok else 1
 

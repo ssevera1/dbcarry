@@ -516,11 +516,6 @@ def test_resolution_overrides_review_view():
     assert findings(plan, "view_review") == []
     assert findings(plan, "view_resolved")[0]["subject"] == "public.tenant_rows"
     assert bs.unresolved_views(plan) == []
-    # a resolution for an auto view is applied too, and stays honest about it
-    plan2 = bs.translate_schema(demo_inventory(), BQ_CFG, {"views": {
-        "public.recent_orders": {"sql": "SELECT 1 AS one", "rationale": "r"}}})
-    recent = by_name(plan2, "views")["public.recent_orders"]
-    assert recent["confidence"] == "resolved" and recent["sql"] == "SELECT 1 AS one"
     # a resolution without sql is ignored, not applied as an empty body
     plan3 = bs.translate_schema(review_inventory(), BQ_CFG,
                                 {"views": {"public.tenant_rows": {"sql": ""}}})
@@ -882,11 +877,25 @@ def test_apply_and_verify_drive_the_live_backend(tmp_path):
         {"tableReference": {"tableId": "sales_by_product"},
          "type": "MATERIALIZED_VIEW"}])
     runner.outputs.append((0, listed, ""))
+    # verify reads every planned table's schema back with bq show
+    for t in plan["tables"]:
+        runner.outputs.append((0, json.dumps(t["fields"]), ""))
     report = bs.verify_schema(plan, backend)
     assert report["pass"] is True and report["actual"] == {"tables": 5,
                                                            "views": 2}
-    assert runner.calls[-1] == (bq + ["ls", "--max_results=10000",
+    assert runner.calls[-6] == (bq + ["ls", "--max_results=10000",
                                       "proj:retail"], None)
+    assert [c[0] for c in runner.calls[-5:]] == [
+        bq + ["show", "--schema", f"proj:retail.{t['bq_name']}"]
+        for t in plan["tables"]]
+    # a schema that does not come back is a mismatch, never a pass
+    runner.outputs.append((0, listed, ""))
+    runner.outputs.append((1, "", "BigQuery error: Not found: Table"))
+    for t in plan["tables"][1:]:
+        runner.outputs.append((0, json.dumps(t["fields"]), ""))
+    report = bs.verify_schema(plan, backend)
+    assert report["pass"] is False and report["missing"] == []
+    assert report["mismatched"][0]["name"] == plan["tables"][0]["qualified"]
     # a dataset bq cannot list counts as missing, never as present
     runner.outputs.append((1, "", "BigQuery error: Not found: Dataset"))
     report = bs.verify_schema(plan, backend)
@@ -1311,7 +1320,8 @@ def test_resolution_must_be_a_single_select(sql):
     "select t.id from `proj.retail.t` t;",
 ])
 def test_resolution_accepts_select_and_with_bodies(sql):
-    resolutions = {"views": {"public.tenant_rows": {"sql": sql}}}
+    resolutions = {"views": {"public.tenant_rows": {"sql": sql,
+                                                    "rationale": "r"}}}
     plan = bs.translate_schema(review_inventory(), BQ_CFG, resolutions)
     assert plan["views"][0]["confidence"] == "resolved"
 
@@ -1334,3 +1344,181 @@ def test_malformed_resolution_is_a_schema_error(tmp_path, monkeypatch,
     assert bs.main(argv + ["translate"]) == 1
     err = capsys.readouterr().err
     assert err.startswith("BQ-SCHEMA ERROR:") and "public.tenant_rows" in err
+
+
+# ------------------------------------------------- review findings, v0.2.0
+
+def test_verify_compares_columns_of_planned_tables(emu, tmp_path):
+    plan = bs.translate_schema(demo_inventory(), BQ_CFG)
+    bs.apply_schema(plan, emu)
+    assert bs.verify_schema(plan, emu)["pass"] is True
+    # tamper with the emulator: one column dropped, one retyped, one with
+    # another mode, one extra; policy tags never count as a difference
+    state = json.loads((tmp_path / "emu" / bb.STATE_FILE).read_text(
+        encoding="utf-8"))
+    fields = state["datasets"]["retail"]["tables"]["orders"]["fields"]
+    by = {f["name"]: f for f in fields}
+    fields.remove(by["region"])
+    by["status"]["type"] = "INT64"
+    by["ordered_at"]["mode"] = "NULLABLE"
+    by["id"]["policyTags"] = {"names": ["projects/p/locations/us/"
+                                        "taxonomies/1/policyTags/2"]}
+    fields.append({"name": "extra", "type": "STRING", "mode": "NULLABLE"})
+    (tmp_path / "emu" / bb.STATE_FILE).write_text(
+        json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    reopened = bb.EmulatedBackend(tmp_path / "emu", "proj", "US")
+    report = bs.verify_schema(plan, reopened)
+    assert report["pass"] is False and report["missing"] == []
+    assert report["actual"] == {"tables": 5, "views": 2}
+    orders = "`proj.retail.orders`"
+    assert report["mismatched"] == [
+        {"name": orders, "column": "extra", "expected": "absent",
+         "actual": "STRING NULLABLE"},
+        {"name": orders, "column": "ordered_at",
+         "expected": "TIMESTAMP REQUIRED", "actual": "TIMESTAMP NULLABLE"},
+        {"name": orders, "column": "region", "expected": "STRING REQUIRED",
+         "actual": "missing"},
+        {"name": orders, "column": "status", "expected": "STRING REQUIRED",
+         "actual": "INT64 REQUIRED"}]
+    # a table whose schema cannot be read is a mismatch, never a pass
+    state["datasets"]["retail"]["tables"]["orders"]["fields"] = fields[:0]
+    (tmp_path / "emu" / bb.STATE_FILE).write_text(
+        json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    report = bs.verify_schema(plan, bb.EmulatedBackend(tmp_path / "emu",
+                                                       "proj", "US"))
+    assert report["pass"] is False
+    assert all(m["name"] == orders for m in report["mismatched"])
+    assert {m["column"] for m in report["mismatched"]} == {
+        "id", "customer_id", "status", "ordered_at", "region"}
+
+
+def test_verify_column_check_normalizes_type_aliases(emu):
+    plan = bs.translate_schema(demo_inventory(), BQ_CFG)
+    bs.apply_schema(plan, emu)
+    # a plan written with INTEGER, FLOAT, BOOLEAN aliases still verifies
+    plan = json.loads(json.dumps(plan))
+    for t in plan["tables"]:
+        for f in t["fields"]:
+            f["type"] = {"INT64": "INTEGER", "FLOAT64": "FLOAT",
+                         "BOOL": "BOOLEAN"}.get(f["type"], f["type"])
+            if f["mode"] == "NULLABLE":
+                del f["mode"]
+    assert bs.verify_schema(plan, emu)["pass"] is True
+
+
+def test_cli_verify_prints_column_mismatches(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(pg, "TOOLS_ROOT", tmp_path / "home")
+    ws = workspace(tmp_path, demo_inventory())
+    argv = ["bq-schema", "--root", str(tmp_path), "--migration", "m1"]
+    assert bs.main(argv + ["translate"]) == 0
+    assert bs.main(argv + ["apply"]) == 0
+    capsys.readouterr()
+    root = bb.emulated_root("m1")
+    state = json.loads((root / bb.STATE_FILE).read_text(encoding="utf-8"))
+    fields = state["datasets"]["retail"]["tables"]["customers"]["fields"]
+    fields[:] = [f for f in fields if f["name"] != "email"]
+    (root / bb.STATE_FILE).write_text(json.dumps(state) + "\n",
+                                     encoding="utf-8")
+    assert bs.main(argv + ["verify"]) == 1
+    out = capsys.readouterr().out
+    assert "SCHEMA VERIFY FAILED" in out
+    assert ("mismatched: `proj.retail.customers`: column email expected "
+            "STRING REQUIRED, actual missing") in out
+    report = json.loads((ws / "artifacts" / "schema-verify.json").read_text(
+        encoding="utf-8"))
+    assert report["mismatched"][0]["column"] == "email"
+
+
+def test_apply_refuses_a_plan_for_another_project_or_location(tmp_path):
+    plan = bs.translate_schema(demo_inventory(), BQ_CFG)
+    other = bb.EmulatedBackend(tmp_path / "other", "other-proj", "US")
+    with pytest.raises(bs.SchemaError, match="other-proj"):
+        bs.apply_schema(plan, other)
+    with pytest.raises(bs.SchemaError, match="other-proj"):
+        bs.apply_schema(plan, other, datasets_only=True)
+    assert other.list_datasets() == []
+    asia = bb.EmulatedBackend(tmp_path / "asia", "proj", "asia-northeast1")
+    with pytest.raises(bs.SchemaError, match="asia-northeast1"):
+        bs.apply_schema(plan, asia)
+    assert asia.list_datasets() == []
+    # location compares without regard to case
+    lower = bb.EmulatedBackend(tmp_path / "lower", "proj", "us")
+    assert bs.apply_schema(plan, lower, datasets_only=True)[0]["status"] == \
+        "created"
+    runner = FakeRunner()
+    live = bb.LiveBackend("proj", "EU", runner=runner,
+                          work_dir=tmp_path / "work")
+    with pytest.raises(bs.SchemaError, match="EU"):
+        bs.apply_schema(plan, live)
+    assert runner.calls == []
+
+
+RESOLVED_SQL = "SELECT t.id FROM `proj.retail.t` t WHERE t.tenant_id = 7"
+
+
+def test_view_resolution_for_an_auto_view_is_ignored():
+    plan = bs.translate_schema(demo_inventory(), BQ_CFG, {"views": {
+        "public.recent_orders": {"sql": "SELECT 1 AS one",
+                                 "rationale": "r"}}})
+    recent = by_name(plan, "views")["public.recent_orders"]
+    assert recent["confidence"] == "auto" and recent["resolved"] is False
+    assert recent["sql"] == recent["auto_sql"] != "SELECT 1 AS one"
+    assert recent["ddl"].startswith("CREATE OR REPLACE VIEW")
+    ignored = findings(plan, "view_resolution_ignored")
+    assert len(ignored) == 1 and ignored[0]["severity"] == "WARNING"
+    assert ignored[0]["subject"] == "public.recent_orders"
+    assert findings(plan, "view_resolved") == []
+
+
+def test_view_resolution_without_rationale_stays_review():
+    for res in ({"sql": RESOLVED_SQL}, {"sql": RESOLVED_SQL, "rationale": ""},
+                {"sql": RESOLVED_SQL, "rationale": "   "}):
+        plan = bs.translate_schema(review_inventory(), BQ_CFG,
+                                   {"views": {"public.tenant_rows": res}})
+        v = plan["views"][0]
+        assert v["confidence"] == "review" and v["resolved"] is False
+        assert v["ddl"] == "" and "current_setting" in v["sql"]
+        codes = [f["code"] for f in plan["findings"]]
+        assert "view_resolution_unjustified" in codes
+        assert "view_review" in codes and "view_resolved" not in codes
+        unjustified = findings(plan, "view_resolution_unjustified")[0]
+        assert unjustified["severity"] == "WARNING"
+        assert unjustified["subject"] == "public.tenant_rows"
+        assert bs.unresolved_views(plan) == ["public.tenant_rows"]
+
+
+def test_view_resolution_against_an_older_definition_is_stale():
+    plan = bs.translate_schema(review_inventory(), BQ_CFG, {"views": {
+        "public.tenant_rows": {
+            "sql": RESOLVED_SQL, "rationale": "tenant is fixed",
+            "source_sql": "SELECT t.id FROM t WHERE t.tenant_id = 1"}}})
+    v = plan["views"][0]
+    assert v["confidence"] == "review" and v["resolved"] is False
+    stale = findings(plan, "view_resolution_stale")
+    assert len(stale) == 1 and stale[0]["severity"] == "WARNING"
+    assert "tenant_id = 1" in stale[0]["message"]
+    assert findings(plan, "view_resolved") == []
+    assert bs.unresolved_views(plan) == ["public.tenant_rows"]
+
+
+def test_view_resolution_with_matching_source_sql_is_applied():
+    # the recorded source_sql matches up to whitespace and the trailing
+    # semicolon, as translation-review.json records it
+    recorded = ("SELECT   t.id FROM t\n  WHERE (t.tenant_id = "
+                "(current_setting('app.tenant'::text))::integer)")
+    plan = bs.translate_schema(review_inventory(), BQ_CFG, {"views": {
+        "public.tenant_rows": {"sql": RESOLVED_SQL, "rationale": "fixed",
+                               "source_sql": recorded}}})
+    v = plan["views"][0]
+    assert v["confidence"] == "resolved" and v["resolved"] is True
+    assert v["sql"] == RESOLVED_SQL
+    assert findings(plan, "view_resolved")[0]["subject"] == "public.tenant_rows"
+    for code in ("view_resolution_ignored", "view_resolution_unjustified",
+                 "view_resolution_stale", "view_review"):
+        assert findings(plan, code) == [], code
+    # the single-statement check still comes first, rationale or not
+    with pytest.raises(bs.SchemaError):
+        bs.translate_schema(review_inventory(), BQ_CFG, {"views": {
+            "public.tenant_rows": {"sql": "SELECT 1; SELECT 2",
+                                   "rationale": "fixed",
+                                   "source_sql": recorded}}})

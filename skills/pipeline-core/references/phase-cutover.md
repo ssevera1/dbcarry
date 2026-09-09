@@ -50,7 +50,12 @@ until the gate is approved).
    decline with reason.
    - Approved: `state approve-gate --gate cutover_approval
      --approved-by <who> --artifact artifacts/07-cutover-runbook.md`,
-     then `state start-phase --phase cutover`.
+     then `state start-phase --phase cutover`. Resuming after a failed
+     cutover attempt: when `state show` already has cutover_approval
+     approved true (a previous attempt failed a step and the quiesce
+     was reverted), approve-gate exits 1 because a gate is approved
+     once; skip it and run only `state start-phase --phase cutover`,
+     which the state machine allows on a failed phase.
    - Declined: `state decline-gate --gate cutover_approval --reason
      <r>` and stop.
 3. Execute the runbook exactly, in order, echoing each step's real
@@ -149,7 +154,12 @@ every number is labeled emulated.
    consequence. AskUserQuestion: approve cutover or decline with reason.
    - Approved: `state approve-gate --gate cutover_approval
      --approved-by <who> --artifact artifacts/07-cutover-runbook.md`,
-     then `state start-phase --phase cutover`.
+     then `state start-phase --phase cutover`. Resuming after a failed
+     cutover attempt: when `state show` already has cutover_approval
+     approved true (a previous attempt failed a step and the quiesce
+     was reverted), approve-gate exits 1 because a gate is approved
+     once; skip it and run only `state start-phase --phase cutover`,
+     which the state machine allows on a failed phase.
    - Declined: `state decline-gate --gate cutover_approval --reason
      <r>` and stop.
 3. Execute the runbook exactly, in order, echoing each step's real

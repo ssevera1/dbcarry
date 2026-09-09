@@ -355,6 +355,34 @@ def _resolved_body(source, res):
     return sql
 
 
+def _normalize_ws(text):
+    return " ".join(str(text or "").split())
+
+
+def _resolution_problem(source, kind, res, rationale, source_sql):
+    """Why a recorded view resolution cannot be applied, as (code,
+    message, action), or None when it can. A resolution needs a
+    rationale (Gate 1 shows it) and, when the sql-translator recorded
+    the source_sql it worked from, that text must still be the view's
+    definition up to whitespace; otherwise the view stays at review."""
+    if not rationale:
+        return ("view_resolution_unjustified",
+                f"the resolution for {kind} {source} has no rationale; "
+                "the view stays at review",
+                "have the sql-translator state why the body keeps the "
+                "source semantics")
+    recorded = res.get("source_sql")
+    if recorded is not None and _normalize_ws(_strip_statement(
+            str(recorded))) != _normalize_ws(source_sql):
+        return ("view_resolution_stale",
+                f"the resolution for {kind} {source} was written against "
+                f"the definition {_normalize_ws(recorded)}, but the source "
+                f"now has {_normalize_ws(source_sql)}; the view stays at "
+                "review",
+                "re-run the sql-translator against the current review file")
+    return None
+
+
 def _view_ddl(qualified, sql, materialized):
     head = ("CREATE MATERIALIZED VIEW IF NOT EXISTS" if materialized
             else "CREATE OR REPLACE VIEW")
@@ -695,19 +723,35 @@ def translate_schema(inventory, bq_cfg, resolutions=None):
         resolved = False
         resolved_sql = _resolved_body(source, view_res[source]) \
             if source in view_res else None
-        if resolved_sql is not None:
-            res = view_res[source]
-            sql = resolved_sql
-            confidence = "resolved"
-            resolved = True
-            rationale = str(res.get("rationale") or "").strip()
-            notes.append("resolved by sql-translator"
-                         + (f": {rationale}" if rationale else ""))
+        if resolved_sql is not None and confidence != "review":
+            # A resolution replaces only a review-flagged translation.
             findings.append(_finding(
-                "NOTE", "view_resolved", source,
-                "the view body comes from translation-resolutions.json"
-                + (f": {rationale}" if rationale else ""),
-                "present the resolution at Gate 1"))
+                "WARNING", "view_resolution_ignored", source,
+                f"translation-resolutions.json carries a resolution for "
+                f"{info['kind']} {source}, but its body translated "
+                "automatically; the automatic translation is kept and the "
+                "recorded one is ignored",
+                "remove the entry, or change the source view if the "
+                "automatic translation is wrong"))
+        elif resolved_sql is not None:
+            res = view_res[source]
+            rationale = str(res.get("rationale") or "").strip()
+            problem = _resolution_problem(source, info["kind"], res,
+                                          rationale, source_sql)
+            if problem is not None:
+                code, message, action = problem
+                findings.append(_finding("WARNING", code, source, message,
+                                         action))
+            else:
+                sql = resolved_sql
+                confidence = "resolved"
+                resolved = True
+                notes.append(f"resolved by sql-translator: {rationale}")
+                findings.append(_finding(
+                    "NOTE", "view_resolved", source,
+                    "the view body comes from translation-resolutions.json"
+                    f": {rationale}",
+                    "present the resolution at Gate 1"))
         materialized = False
         if info["kind"] == "matview":
             base_views = [b for b in bases.get(source, [])
@@ -907,14 +951,23 @@ def apply_schema(plan, backend, log=None, datasets_only=False):
     """Create datasets, then tables, then views through the backend.
 
     log is an optional callable that receives one progress line per
-    step. Refuses (SchemaError, before touching the backend) when any
-    view is review confidence and unresolved, unless datasets_only.
-    Returns the list of operations performed.
+    step. Refuses (SchemaError, before touching the backend) when the
+    plan was written for another project or location than the backend
+    serves, and when any view is review confidence and unresolved,
+    unless datasets_only. Returns the list of operations performed.
     """
     def say(text):
         if log is not None:
             log(text)
 
+    if plan.get("project") != backend.project or \
+            str(plan.get("location") or "").lower() != \
+            str(backend.location or "").lower():
+        raise SchemaError(
+            f"the schema plan targets {plan.get('project')} "
+            f"({plan.get('location')}) but the backend serves "
+            f"{backend.project} ({backend.location}); re-run bq-schema "
+            "translate after changing the migration's bigquery config")
     if not datasets_only:
         pending = unresolved_views(plan)
         if pending:
@@ -950,14 +1003,44 @@ def apply_schema(plan, backend, log=None, datasets_only=False):
     return ops
 
 
+def _field_shape(field):
+    """(name, normalized type, mode) of a bq field; policy tags and any
+    other decoration are not part of the comparison."""
+    type_name = str(field.get("type") or "").upper()
+    type_name = bq_backend.TYPE_ALIASES.get(type_name, type_name)
+    mode = str(field.get("mode") or "NULLABLE").upper()
+    return field.get("name"), type_name, mode
+
+
+def _column_mismatches(entry, actual_fields):
+    """Mismatch entries for one table: every planned column the target
+    lacks or holds with another type or mode, and every extra column."""
+    planned = {name: (type_name, mode) for name, type_name, mode
+               in (_field_shape(f) for f in entry["fields"])}
+    actual = {name: (type_name, mode) for name, type_name, mode
+              in (_field_shape(f) for f in actual_fields)}
+    out = []
+    for name in sorted(set(planned) | set(actual)):
+        want, got = planned.get(name), actual.get(name)
+        if want == got:
+            continue
+        out.append({"name": entry["qualified"], "column": name,
+                    "expected": " ".join(want) if want else "absent",
+                    "actual": " ".join(got) if got else "missing"})
+    return out
+
+
 def verify_schema(plan, backend):
     """List the planned datasets and compare with the plan.
 
     expected and actual count tables and views (materialized views
     count as views; actual counts every object the datasets hold).
     missing lists planned objects the target lacks; mismatched lists
-    objects present with another type. pass needs both lists empty;
-    extra objects on the target are not a failure.
+    objects present with another type, and for each planned table
+    every column whose name, type, or mode differs from the plan
+    (a missing column and an extra column both count; policy tags do
+    not). Views are checked by name and type only. pass needs both
+    lists empty; extra objects on the target are not a failure.
     """
     listed = {}
     for dataset in plan["datasets"]:
@@ -980,12 +1063,24 @@ def verify_schema(plan, backend):
         got = names.get(entry["bq_name"])
         if got is None:
             missing.append(entry["qualified"])
-        elif got != want:
+            return False
+        if got != want:
             mismatched.append({"name": entry["qualified"], "expected": want,
                                "actual": got})
+            return False
+        return True
 
     for t in plan["tables"]:
-        check(t, "TABLE")
+        if not check(t, "TABLE"):
+            continue
+        try:
+            fields = backend.get_table_schema(t["dataset"], t["bq_name"])
+        except bq_backend.BackendError as exc:
+            mismatched.append({"name": t["qualified"], "column": "*",
+                               "expected": f"{len(t['fields'])} columns",
+                               "actual": f"schema unreadable: {exc}"})
+            continue
+        mismatched.extend(_column_mismatches(t, fields))
     for v in plan["views"]:
         check(v, "MATERIALIZED_VIEW" if v["materialized"] else "VIEW")
     return {"expected": {"tables": len(plan["tables"]),
@@ -1150,8 +1245,12 @@ def _verify(args, bq_cfg, ws):
     for name in report["missing"]:
         print(f"  missing: {name}")
     for item in report["mismatched"]:
-        print(f"  mismatched: {item['name']} is {item['actual']}, expected "
-              f"{item['expected']}")
+        if "column" in item:
+            print(f"  mismatched: {item['name']}: column {item['column']} "
+                  f"expected {item['expected']}, actual {item['actual']}")
+        else:
+            print(f"  mismatched: {item['name']} is {item['actual']}, "
+                  f"expected {item['expected']}")
     verdict = "PASSED" if report["pass"] else "FAILED"
     print(f"SCHEMA VERIFY {verdict} ({backend.mode}); wrote "
           f"{art / VERIFY_FILE}")

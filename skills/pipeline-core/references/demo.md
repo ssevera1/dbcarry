@@ -17,10 +17,13 @@ run via the shell tool from the user's project directory.
 3. `python "$SCRIPTS" pg start --name onprem`
 4. `python "$SCRIPTS" seed --port 55432 --dbname retail`
 5. Report the seeded counts table, then print next steps for the user:
-   the suggested init invocation is
-   `/db-drift:init demo-run` with source host 127.0.0.1, port 55432,
+   two suggested init invocations, BigQuery first:
+   `/db-drift:init demo-bq` with source host 127.0.0.1, port 55432,
    dbname retail, user postgres, no password env var (trust auth,
-   localhost demo only), provider local, downtime tolerance low.
+   localhost demo only), provider bigquery, mode emulated, downtime
+   tolerance flexible (the path docs/HANDOFF.md walks through); or
+   `/db-drift:init demo-run` with the same source, provider local,
+   downtime tolerance low (the PostgreSQL to PostgreSQL path).
 
 ## teardown
 

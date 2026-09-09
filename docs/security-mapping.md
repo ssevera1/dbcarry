@@ -291,9 +291,14 @@ blocks `bq-schema apply`. The plan phase writes every flagged item with its
 source SQL, the auto attempt, the notes, and the table context to
 `artifacts/translation-review.json`. The sql-translator subagent answers
 with `artifacts/translation-resolutions.json` (`{"views": {...},
-"policies": {"schema.table/policy": {"sql", "rationale"}}}`). The plan is
-then re-run, and the resolved item carries confidence `resolved` and the
-NOTE `translation_resolved`. Gate 1 shows every resolution and its
+"policies": {"schema.table/policy": {"sql", "rationale", "source_sql"}}}`).
+The plan is then re-run, and the resolved item carries confidence
+`resolved` and the NOTE `translation_resolved`. A resolution counts only
+for a review-flagged item, only with a rationale, only while its
+`source_sql` still equals the source predicate, and only when its `sql`
+is one balanced expression without a semicolon; otherwise the item stays
+at `review` with a WARNING naming the reason, because the live backend
+hands the filter text to `bq query`, which runs scripts. Gate 1 shows every resolution and its
 rationale before anything is provisioned. The demo needs no resolutions:
 its review file holds empty `views` and `policies` maps.
 

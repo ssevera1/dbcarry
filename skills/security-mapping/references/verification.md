@@ -33,8 +33,13 @@ exits 1 on failure. Checks are sorted by name.
 | `tag_reader:<tag>:<member>` | `present` | the tag's IAM policy, role `roles/datacatalog.categoryFineGrainedReader` |
 | `tag_reader_extra:<tag>:<member>` | `absent` (a fine-grained reader the plan does not list) | the tag's IAM policy |
 | `column_tag:<dataset>.<table>.<column>` | the tag resource name without its project segment | the table schema's `policyTags.names` |
-| `row_policy:<dataset>.<table>/<name>` | `GRANT TO (<members sorted>) FILTER USING (<filter, whitespace normalized>)` | the table's row access policy list; members compared as sets, filters compared after whitespace normalization |
+| `row_policy:<dataset>.<table>/<name>` | `GRANT TO (<members sorted>) FILTER USING (<filter, whitespace normalized>)` | the table's row access policy list; members compared as sets, filters compared after whitespace normalization. Live: `bq ls --row_access_policies` does not return grantees, so members are read through `rowAccessPolicies.getIamPolicy` (`roles/bigquery.filteredDataViewer` bindings) and each policy records `members_source: iam`; when that read fails the listing's grantees are used with `members_source: list`. NOT LIVE-TESTED |
 | `row_policy_extra:<dataset>.<table>/<name>` | `absent` (a policy on a planned table that the plan does not name) | the table's row access policy list |
+| `table_binding_extra:<dataset>.<table>:<role>:<member>` | `absent` (a data read role on a table of a planned dataset for a member the plan does not name) | every table's IAM policy in every planned dataset |
+| `dataset_access_extra:<dataset>:<role>:<member>` | `absent` (a data read role in a planned dataset's access list for a member the plan does not name; the three project special groups BigQuery adds to every dataset are not extras) | the dataset access list |
+| `dataset_owner_identity:<dataset>:<member>` | passes (live mode only): a dataOwner entry for a user or service account, which is the identity that created the dataset; listed so the validator sees it | the dataset access list |
+| `authorized_view_extra:<dataset>:<view>` | `absent` (a view authorized on a planned dataset that the plan does not list) | the dataset access list |
+| `project_binding_extra:<role>:<member>` | `absent`; emitted only for `allUsers` or `allAuthenticatedUsers`, because the project IAM policy is not pipeline-owned | project IAM policy |
 
 Member comparison treats `user:` and `serviceAccount:` alike (bq stores
 both as userByEmail) and compares emails without case. A backend error
@@ -54,9 +59,13 @@ it.
 set and writes `security-probes.json` with `ran: false`; `--run`
 executes it, `--no-source` skips the PostgreSQL counts (statuses are
 still compared). Output: `{"mode", "migration", "ran", "pass",
-"skipped", "probes": [...]}`, one line per failed probe, then
-`SECURITY PROBES PASSED (<mode>): P of N probes` or `FAILED`, exit 1
-on failure. An empty set prints `SECURITY PROBES SKIPPED` and records
+"skipped", "source_compared", "probes": [...]}`, one line per failed
+probe, then `SECURITY PROBES PASSED (<mode>): P of N probes` or
+`FAILED`, exit 1 on failure. With `--no-source` the document records
+`source_compared: false` and the line reads `PASSED (<mode>, status
+only, counts not compared)`; the validate playbook treats that as not a
+pass in live mode, because every row_count probe then passed on status
+alone. An empty set prints `SECURITY PROBES SKIPPED` and records
 `pass: false`, because nothing ran and nothing was validated; the
 validate playbook treats that as not a pass.
 
@@ -108,6 +117,17 @@ allowed it; `app_ro` on `customers` selects `id`, `full_name`,
 without comparison. No `table_denied` probes: every mapped role reads
 every table at some scope.
 
+Before any row access policy is created, both backends check its
+filter with `check_filter_sql`: one statement, balanced parentheses
+closing only at the end, no semicolon outside a string or comment, and
+no trailing line comment; anything else raises before `bq query` sees
+it, because `bq query` runs scripts. The planner runs the same check on
+every resolution (`translation_resolution_malformed`). Member
+principals are limited to the kinds `user`, `group`, `serviceAccount`,
+`domain`, `specialGroup`, and `deleted`, with values in
+`[A-Za-z0-9._+@:?=/-]`; workforce-pool `principal://` and
+`principalSet://` members are refused.
+
 ## What `unevaluable` means
 
 The backend could not answer, so the probe fails and the verdict must
@@ -122,7 +142,13 @@ say why, never pass:
   three-valued logic. A comparison against an INT64 or other non-STRING
   column, `LIKE`, a function call, a number literal, or an identifier
   outside `[A-Za-z0-9_]` is unevaluable, with the predicate quoted in
-  the reason. Such a predicate can only be proved live.
+  the reason. Such a predicate can only be proved live. String literals
+  decode BigQuery escapes (`\uXXXX`, `\UXXXXXXXX`, `\xHH`, octal, and
+  the single-character escapes); an unknown escape is unevaluable. A
+  `SESSION_USER()` predicate probed as a `group:` or other non-user
+  principal compares the group address, and the reason says so:
+  BigQuery evaluates it per member, so that count is reported and never
+  a verified deny.
 - Live: never for a missing `probe_service_account`. A role without one
   gets no probes at all (`probe_set` skips it), and when no role has one
   the run prints `SECURITY PROBES SKIPPED` and records `pass: false`.

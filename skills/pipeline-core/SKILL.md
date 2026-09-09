@@ -29,8 +29,11 @@ the user this plainly if they configure mysql.
 
 1. NEVER edit state.json by hand. Every state change goes through the
    state CLI, which enforces transitions and appends to the decision
-   log. A PreToolUse hook blocks hand edits and any shell command that
-   names state.json next to a redirect or a write marker.
+   log. A PreToolUse hook blocks hand edits, any shell command that
+   names state.json outside a read-only form (cat, grep, jq,
+   Get-Content, the state CLI), and any command that removes, moves,
+   copies, or writes into a migrations directory; a report whose text
+   quotes state.json is written with the Write tool, never a heredoc.
 2. The source database is read-only to this pipeline. Scripts enforce it
    (PGOPTIONS default_transaction_read_only). The only exceptions, each
    allowed only when the approved plan explicitly lists it: creating a
@@ -75,7 +78,9 @@ project directory (the shell CWD), never inside the plugin.
 ## Running scripts
 
 $SCRIPTS = ${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py, invoked as
-`python "$SCRIPTS" <verb> ...`.
+`python "$SCRIPTS" <verb> ...`. When the plugin checkout is itself the
+project directory, use the relative form `python scripts/dbdrift.py`,
+which the project's permission allowlist covers.
 
 Connection-flag verbs (inventory, dump, restore, objcount, checksum,
 replicate, security): read source connection parameters from
@@ -87,7 +92,9 @@ Workspace verbs (state, bq-schema, bq-security, bq-load, bq-validate,
 bq-backend): take `--root` (default `.`) and `--migration <name>` and
 resolve <root>/migrations/<name>/; run them from the user's project
 directory so the default --root is right. The bq-* verbs accept --root
-and --migration before or after their sub-verb. Sub-verbs and flags:
+and --migration before or after their sub-verb (except `bq-validate
+compare`, which takes no workspace flags); for `state` the two flags go
+before the sub-verb. Sub-verbs and flags:
 `bq-schema translate | apply [--datasets-only] | verify`;
 `bq-security plan [--template] [--force] [--review-out PATH] | apply |
 verify | probes [--run] [--no-source]`;

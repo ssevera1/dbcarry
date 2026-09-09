@@ -87,3 +87,18 @@ def test_export_expressions():
     assert t.export_expression(col("ARRAY", "_text", element_type="text")) \
         == 'to_json("c")'
     assert t.export_expression(col("interval", "interval")) == '("c")::text'
+
+
+def test_bytea_array_exports_base64_elements():
+    # to_json over bytea[] would render hex text, which bq load rejects
+    # for ARRAY<BYTES>; each element is base64 without line breaks
+    expr = t.export_expression(col("ARRAY", "_bytea", element_type="bytea"))
+    assert expr == ("(SELECT to_json(array_agg(translate(encode(e, 'base64'), "
+                    "E'\\n', ''))) FROM unnest(\"c\") e)")
+    assert t.map_type(col("ARRAY", "_bytea", element_type="bytea"))[0] == \
+        "ARRAY<BYTES>"
+    # the element type is read from udt_name when element_type is absent
+    assert t.export_expression(col("ARRAY", "_bytea")) == expr
+    # other arrays keep the plain to_json export
+    assert t.export_expression(col("ARRAY", "_int4", element_type="int4")) \
+        == 'to_json("c")'

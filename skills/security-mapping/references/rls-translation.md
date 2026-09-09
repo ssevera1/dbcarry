@@ -141,11 +141,18 @@ Output: `artifacts/translation-resolutions.json`:
 
 ```json
 {
-  "views": {"public.some_view": {"sql": "SELECT ...", "rationale": "..."}},
+  "views": {"public.some_view": {"sql": "SELECT ...", "rationale": "...",
+                                 "source_sql": "<copied from the review file>"}},
   "policies": {"public.orders/tenant": {"sql": "(tenant_id = 7)",
-                                        "rationale": "single tenant on target"}}
+                                        "rationale": "single tenant on target",
+                                        "source_sql": "<copied from the review file>"}}
 }
 ```
+
+`source_sql` is the review item's `source_sql`, copied unchanged: the
+planner compares it with the predicate the source has now, so a
+resolution written against an older policy text is rejected instead of
+applied. `rationale` is mandatory.
 
 Rules the planner enforces on the next `bq-security plan`:
 
@@ -155,6 +162,15 @@ Rules the planner enforces on the next `bq-security plan`:
   table and role. Confidence becomes `resolved`, the rationale is
   appended to the policy's notes, and NOTE `translation_resolved` is
   raised for Gate 1.
+- A resolution is applied only to a `review` translation; one recorded
+  for a predicate that translated automatically is ignored with WARNING
+  `translation_resolution_ignored`. A resolution without a rationale
+  (`translation_resolution_unjustified`), with a `source_sql` that no
+  longer equals the source predicate (`translation_resolution_stale`),
+  or whose `sql` is not one balanced expression or carries a semicolon
+  (`translation_resolution_malformed`, because the live backend hands
+  the filter to `bq query`, which runs scripts) leaves the policy at
+  `review` with that WARNING.
 - An empty `sql` does not count: the policy stays `review`, WARNING
   `translation_review` stays, and apply stays blocked. When a construct
   has no BigQuery equivalent, say so in the rationale and leave `sql`

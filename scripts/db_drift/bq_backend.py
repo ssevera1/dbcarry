@@ -27,6 +27,7 @@ import decimal
 import gzip
 import importlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -56,11 +57,19 @@ FORBIDDEN_MEMBERS = ("allUsers", "allAuthenticatedUsers")
 # The only specialGroup values bq accepts besides the two forbidden ones.
 PROJECT_SPECIAL_GROUPS = ("projectOwners", "projectReaders", "projectWriters")
 _MEMBER_KIND_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
-_MEMBER_BAD_CHARS_RE = re.compile(r"[\s\"'`\\\x00-\x1f]")
+# The principal types the pipeline binds, spelled as IAM spells them.
+MEMBER_KINDS = ("user", "group", "serviceAccount", "domain", "specialGroup",
+                "deleted")
+# What an email, a domain, or a deleted-principal suffix (?uid=) needs
+# and nothing a shell or cmd.exe would expand.
+_MEMBER_VALUE_RE = re.compile(r"^[A-Za-z0-9._+@:?=/-]+$")
 MIGRATION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 TAXONOMY_NAME_RE = re.compile(
     r"^projects/([^/]+)/locations/([^/]+)/taxonomies/([^/]+)$")
 DATACATALOG_API = "https://datacatalog.googleapis.com/v1"
+BIGQUERY_API = "https://bigquery.googleapis.com/bigquery/v2"
+# The role rowAccessPolicies.getIamPolicy reports a policy's grantees under.
+ROLE_FILTERED_VIEWER = "roles/bigquery.filteredDataViewer"
 # bq ls returns 50 items unless told otherwise; a real schema has more.
 BQ_LS_MAX_RESULTS = 10000
 
@@ -113,8 +122,41 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?"
 _TWO_CHAR_OPS = ("<>", "!=", "<=", ">=", "||")
 # An optional r, b, rb, or br prefix followed by the opening quote.
 _STRING_START_RE = re.compile(r"(?i)(rb|br|r|b)?(['\"])")
-_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "a": "\a",
-            "b": "\b", "f": "\f", "v": "\v"}
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b",
+            "f": "\f", "v": "\v", "\\": "\\", "?": "?", "'": "'",
+            '"': '"', "`": "`"}
+# Escapes that take a fixed number of hex digits.
+_HEX_ESCAPES = {"x": 2, "X": 2, "u": 4, "U": 8}
+_OCTAL_DIGITS = "01234567"
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+
+
+def _decode_escape(sql, j):
+    """Decode the backslash escape at sql[j] the way BigQuery reads a
+    non-raw literal: the single-character escapes, \\ooo (three octal
+    digits), \\xhh, \\Xhh, \\uhhhh, and \\Uhhhhhhhh. Returns (text, end).
+    Anything else, a short digit run included, is a syntax error, as
+    it is in BigQuery."""
+    nxt = sql[j + 1] if j + 1 < len(sql) else ""
+    if nxt in _ESCAPES:
+        return _ESCAPES[nxt], j + 2
+    if nxt in _HEX_ESCAPES:
+        width = _HEX_ESCAPES[nxt]
+        digits = sql[j + 2:j + 2 + width]
+        if len(digits) != width or any(d not in _HEX_DIGITS for d in digits):
+            raise SqlSyntaxError(
+                f"escape \\{nxt} needs {width} hexadecimal digits")
+        code = int(digits, 16)
+        if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+            raise SqlSyntaxError(
+                f"escape \\{nxt}{digits} is not a valid code point")
+        return chr(code), j + 2 + width
+    if nxt and nxt in _OCTAL_DIGITS:
+        digits = sql[j + 1:j + 4]
+        if len(digits) != 3 or any(d not in _OCTAL_DIGITS for d in digits):
+            raise SqlSyntaxError("an octal escape needs three digits")
+        return chr(int(digits, 8)), j + 4
+    raise SqlSyntaxError(f"invalid escape sequence \\{nxt}")
 
 
 def _read_string(sql, quote_at, raw):
@@ -134,9 +176,12 @@ def _read_string(sql, quote_at, raw):
             return "".join(buf), j + len(close)
         c = sql[j]
         if c == "\\" and j + 1 < n:
-            nxt = sql[j + 1]
-            buf.append(c + nxt if raw else _ESCAPES.get(nxt, nxt))
-            j += 2
+            if raw:
+                buf.append(c + sql[j + 1])
+                j += 2
+            else:
+                text, j = _decode_escape(sql, j)
+                buf.append(text)
             continue
         buf.append(c)
         j += 1
@@ -252,6 +297,44 @@ def split_statements(sql):
     if current:
         flush()
     return out
+
+
+def check_filter_sql(filter_sql):
+    """Refuse a row access policy filter that could carry more than one
+    predicate into CREATE ROW ACCESS POLICY ... FILTER USING (<filter>).
+
+    The filter is interpolated into that statement, so it must be one
+    statement with no ';' token, its parentheses must balance with the
+    closing scan reaching only the end (so "TRUE) OR (TRUE" cannot
+    close the FILTER USING group early), and it must not end inside a
+    line comment that would swallow the closing parenthesis. All checks
+    are quote-aware and comment-aware: ';' and ')' inside a string
+    literal or a comment are fine. Returns None or raises
+    SqlSyntaxError. Backends wrap that in a BackendError naming the
+    policy; bq_security calls it at plan time.
+    """
+    text = filter_sql or ""
+    if not text.strip():
+        raise SqlSyntaxError("the filter is empty")
+    statements = split_statements(text)
+    if len(statements) != 1:
+        raise SqlSyntaxError(
+            f"the filter holds {len(statements)} statements, not one")
+    tokens = statements[0][1]
+    if any(t.kind == "punct" and t.text == ";" for t in tokenize_sql(text)):
+        raise SqlSyntaxError(
+            "the filter contains ';' outside a string literal or comment")
+    wrapped = ([Token("punct", "(", -1, 0)] + tokens
+               + [Token("punct", ")", len(text), len(text) + 1)])
+    if _match_paren(wrapped, 0) != len(wrapped) - 1:
+        raise SqlSyntaxError(
+            "the filter closes a parenthesis it did not open")
+    probe = tokenize_sql(text + " )")
+    if not probe or probe[-1].kind != "punct" or probe[-1].text != ")":
+        raise SqlSyntaxError(
+            "the filter ends inside a line comment, which would swallow "
+            "the closing parenthesis")
+    return None
 
 
 # ------------------------------------------------------ predicate evaluator
@@ -459,6 +542,16 @@ def _eval_node(node, row, session_user):
     raise Unevaluable(f"unknown node {kind}")
 
 
+def _references_session_user(predicate):
+    """True when the predicate calls SESSION_USER() outside a literal."""
+    try:
+        tokens = tokenize_sql(predicate or "")
+    except SqlSyntaxError:
+        return False
+    return any(t.kind == "word" and t.text.upper() == "SESSION_USER"
+               for t in tokens)
+
+
 def compile_predicate(predicate, fields):
     """Return f(row, session_user) -> True, False, or None (SQL NULL)."""
     try:
@@ -493,7 +586,15 @@ def _check_member(member):
     """Reject anything that is not a typed IAM principal, and every
     spelling of the two everyone-principals: bare, behind a type prefix
     (specialGroup:allAuthenticatedUsers is how bq grants a dataset to
-    every Google account), or in another case."""
+    every Google account), or in another case.
+
+    Members travel to bq and gcloud as argv, and on Windows those are
+    .cmd shims that cmd.exe expands, so the value is held to the plain
+    characters an email, domain, or deleted-principal suffix needs:
+    letters, digits, and . _ + @ : ? = / -. That rejects & | ^ % < > ( )
+    $ ; and every non-ASCII or zero-width character. The kind is one of
+    the six principal types the pipeline maps to, spelled exactly.
+    """
     if not isinstance(member, str) or not member:
         raise BackendError("member must be a non-empty principal string")
     kind, sep, value = member.partition(":")
@@ -505,14 +606,30 @@ def _check_member(member):
     if not sep or not value or not _MEMBER_KIND_RE.match(kind):
         raise BackendError(
             f"member {member!r} must be typed, for example group:x@example.com")
-    if _MEMBER_BAD_CHARS_RE.search(value):
+    if kind not in MEMBER_KINDS:
         raise BackendError(
-            f"member {member!r} contains whitespace, a quote, a backslash, "
-            "or a control character")
+            f"member {member!r}: the principal type must be one of "
+            + ", ".join(MEMBER_KINDS) + " (case-sensitive)")
+    if not _MEMBER_VALUE_RE.match(value):
+        raise BackendError(
+            f"member {member!r} contains a character outside "
+            "[A-Za-z0-9._+@:?=/-]")
     if kind == "specialGroup" and value not in PROJECT_SPECIAL_GROUPS:
         raise BackendError(
             f"member {member!r}: specialGroup accepts only "
             + ", ".join(PROJECT_SPECIAL_GROUPS))
+
+
+def _checked_filter(name, filter_sql):
+    """check_filter_sql for a policy, as a BackendError naming it."""
+    try:
+        check_filter_sql(filter_sql)
+    except SqlSyntaxError as exc:
+        raise BackendError(
+            f"row access policy {name}: refusing the filter ({exc}); the "
+            "filter must be a single predicate that fits inside FILTER "
+            "USING (...)")
+    return filter_sql
 
 
 def _parse_taxonomy_name(name, project, location):
@@ -869,29 +986,78 @@ def _parse_column(group):
 
 # ------------------------------------------------------- EmulatedBackend
 
+def _workspace_mismatch(path, stored, wanted):
+    return (f"emulator state at {path} was created by the workspace "
+            f"{stored}, not {wanted}; two working directories share this "
+            "migration name. Use a different migration name here, or run "
+            "bq-backend reset --yes from the recorded workspace to start "
+            "over")
+
+
+def _same_path(a, b):
+    """Two path strings name the same place, allowing for case and
+    separator differences on Windows."""
+    return os.path.normcase(os.path.normpath(str(a))) == \
+        os.path.normcase(os.path.normpath(str(b)))
+
+
+def _replace_file(path, write):
+    """Write through a temporary sibling and os.replace it into place, so
+    a reader never sees a half-written file and a failed write leaves the
+    previous one intact. write(tmp_path) produces the content."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        write(tmp)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
 class EmulatedBackend(Backend):
     """A JSON model of one BigQuery project on local disk.
 
     State lives in root/state.json; loaded rows live under
     root/data/<dataset>/<table>.ndjson.gz. Every write goes through
     save(), so a test can tamper with the JSON and reopen the backend.
+    Writes land through a temporary sibling and os.replace, so a
+    crash mid-write leaves the previous file whole; there is no lock,
+    so two concurrent loads of one table are not guarded against each
+    other.
+
+    The emulator directory is keyed by migration name under the tool
+    home, so the state records the workspace that created it and the
+    backend refuses to open for another workspace with the same
+    migration name (workspace=None, as tests and tooling use, skips the
+    check). A state file written before the key existed is adopted by
+    the first workspace that opens it.
     """
 
     mode = "emulated"
 
-    def __init__(self, root, project, location, log=None):
+    def __init__(self, root, project, location, log=None, workspace=None):
         self.root = Path(root)
         self.project = project
         self.location = location
+        self.workspace = (str(Path(workspace).resolve())
+                          if workspace is not None else None)
         self.log = log or OperationLog(None)
         self.state = self._load()
 
     # ---- persistence
 
     def _empty_state(self):
-        return {"version": 1, "project": self.project,
-                "location": self.location, "next_id": 1, "datasets": {},
-                "project_bindings": [], "taxonomies": {}}
+        state = {"version": 1, "project": self.project,
+                 "location": self.location, "next_id": 1, "datasets": {},
+                 "project_bindings": [], "taxonomies": {}}
+        if self.workspace is not None:
+            state["workspace"] = self.workspace
+        return state
 
     def _load(self):
         path = self.root / STATE_FILE
@@ -912,16 +1078,27 @@ class EmulatedBackend(Backend):
                     f"emulator state at {path} belongs to {key} {stored!r}, "
                     f"not {wanted!r}; run bq-backend reset --yes to start "
                     "over or restore the migration's bigquery config")
+        adopt = False
+        if self.workspace is not None:
+            stored = state.get("workspace")
+            if stored is None:
+                state["workspace"] = self.workspace
+                adopt = True
+            elif not _same_path(stored, self.workspace):
+                raise BackendError(_workspace_mismatch(path, stored,
+                                                       self.workspace))
         base = self._empty_state()
         for key, value in base.items():
             state.setdefault(key, value)
+        if adopt:
+            self.state = state
+            self.save()
         return state
 
     def save(self):
-        self.root.mkdir(parents=True, exist_ok=True)
-        path = self.root / STATE_FILE
-        path.write_text(json.dumps(self.state, indent=2) + "\n",
-                        encoding="utf-8")
+        text = json.dumps(self.state, indent=2) + "\n"
+        _replace_file(self.root / STATE_FILE,
+                      lambda tmp: tmp.write_text(text, encoding="utf-8"))
 
     def _data_path(self, dataset, table):
         return self.root / "data" / dataset / f"{table}.ndjson.gz"
@@ -1203,6 +1380,7 @@ class EmulatedBackend(Backend):
             _check_member(m)
         if not filter_sql:
             raise BackendError(f"row access policy {name} has an empty filter")
+        _checked_filter(name, filter_sql)
         if name in tbl["row_policies"]:
             if if_not_exists:
                 return "exists"
@@ -1437,8 +1615,12 @@ class EmulatedBackend(Backend):
                     f"load schema names column {name!r} which is not in "
                     f"{dataset}.{table}")
             load_fields[name] = f
-        rows = list(self._iter_ndjson(path))
-        for idx, row in enumerate(rows, 1):
+        # Rows are parsed with Decimal for the checks and the original
+        # line text is what gets stored, so a NUMERIC or BIGNUMERIC value
+        # keeps every digit (json.dumps of a parsed float would round
+        # 12345678901234567.89 to 1.2345678901234568e+16).
+        lines = list(self._iter_ndjson(path))
+        for idx, (_line, row) in enumerate(lines, 1):
             if not isinstance(row, dict):
                 raise BackendError(f"row {idx}: not a JSON object")
             for key in row:
@@ -1458,17 +1640,24 @@ class EmulatedBackend(Backend):
                         f"row {idx}: column {name} is REPEATED but the value "
                         "is not a list")
         target = self._data_path(dataset, table)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(target, "at", encoding="utf-8") as fh:
-            for row in rows:
-                fh.write(json.dumps(row) + "\n")
+
+        def write(tmp):
+            if target.exists():
+                shutil.copyfile(target, tmp)
+            with gzip.open(tmp, "at", encoding="utf-8") as fh:
+                for line, _row in lines:
+                    fh.write(line + "\n")
+
+        _replace_file(target, write)
         total = self.count_rows(dataset, table)
         self.log.record("load_ndjson", dataset=dataset, table=table,
-                        source=str(path), rows_in_file=len(rows), rows=total)
+                        source=str(path), rows_in_file=len(lines), rows=total)
         return total
 
     @staticmethod
     def _iter_ndjson(path):
+        """(line, row) per non-blank line: the line text with only the
+        newline stripped, and its JSON parsed with Decimal numbers."""
         p = Path(path)
         if not p.exists():
             raise BackendError(f"NDJSON file not found: {p}")
@@ -1477,11 +1666,11 @@ class EmulatedBackend(Backend):
         opener = gzip.open if magic == b"\x1f\x8b" else open
         with opener(p, "rt", encoding="utf-8") as fh:
             for line in fh:
-                line = line.strip()
-                if not line:
+                line = line.rstrip("\r\n")
+                if not line.strip():
                     continue
                 try:
-                    yield json.loads(line)
+                    yield line, json.loads(line, parse_float=decimal.Decimal)
                 except ValueError as exc:
                     raise BackendError(f"bad NDJSON line in {p}: {exc}")
 
@@ -1588,6 +1777,7 @@ class EmulatedBackend(Backend):
                           f"none names {principal}; BigQuery returns no rows")
         session_user = _principal_email(principal)
         matched = set()
+        group_session_user = False
         for name, policy in applicable.items():
             try:
                 fn = compile_predicate(policy["filter"], tbl["fields"])
@@ -1596,12 +1786,21 @@ class EmulatedBackend(Backend):
                               f"row access policy {name} has a predicate the "
                               f"emulator cannot evaluate ({exc}): "
                               f"{policy['filter']}")
+            if principal.partition(":")[0] not in ("user", "serviceAccount") \
+                    and _references_session_user(policy["filter"]):
+                group_session_user = True
             for idx, row in enumerate(rows):
                 if fn(row, session_user) is True:
                     matched.add(idx)
-        return result("ok", len(matched),
-                      f"{len(matched)} rows as {principal} through "
-                      f"{', '.join(sorted(applicable))}")
+        reason = (f"{len(matched)} rows as {principal} through "
+                  f"{', '.join(sorted(applicable))}")
+        if group_session_user:
+            # The status stands: the emulator has no member list for a
+            # group, so it compares SESSION_USER() with the group's own
+            # address and says so.
+            reason += ("; emulated: SESSION_USER() compared with the group "
+                       "address; BigQuery evaluates it per member")
+        return result("ok", len(matched), reason)
 
 
 # ----------------------------------------------------------- LiveBackend
@@ -1691,8 +1890,10 @@ class LiveBackend(Backend):
     runner(argv, stdin) -> (returncode, stdout, stderr). The default runs
     subprocess with UTF-8. http(method, url, headers, body) -> (status,
     text) serves create_taxonomy, create_policy_tag, and delete_taxonomy,
-    which gcloud cannot do; the default uses urllib with a token from
-    gcloud auth print-access-token. work_dir holds the schema and access
+    which gcloud cannot do, and the rowAccessPolicies.getIamPolicy read
+    behind list_row_policies, which bq ls does not return; the default
+    uses urllib with a token from gcloud auth print-access-token.
+    work_dir holds the schema and access
     documents bq reads from files; make_backend puts it under the
     workspace. Every call, failed ones included, records its argv or URL
     (tokens redacted) in the OperationLog. Written from the CLI and API
@@ -1767,12 +1968,12 @@ class LiveBackend(Backend):
     def _api_url(self, path):
         return f"{DATACATALOG_API}/{path}"
 
-    def _datacatalog(self, method, path, body=None):
-        """One Data Catalog API call as the active gcloud account. The
-        token travels in a header only; responses are scrubbed of it
-        before they reach a log or an error."""
-        url = self._api_url(path)
-        token = self._access_token()
+    def _api(self, method, url, body=None, token=None):
+        """One Google REST API call as the active gcloud account (or with
+        a token already minted for a run of calls). The token travels in
+        a header only; responses are scrubbed of it before they reach a
+        log or an error."""
+        token = token or self._access_token()
         headers = {"Authorization": f"Bearer {token}",
                    "Content-Type": "application/json; charset=utf-8",
                    "Accept": "application/json"}
@@ -1784,6 +1985,10 @@ class LiveBackend(Backend):
             raise BackendError(f"{method} {url} failed ({status}): {text[:800]}")
         doc = parse_json_output(text)
         return doc if isinstance(doc, dict) else {}
+
+    def _datacatalog(self, method, path, body=None):
+        """One Data Catalog API call."""
+        return self._api(method, self._api_url(path), body)
 
     def _work_file(self, stem, payload):
         if self.work_dir is None:
@@ -2078,6 +2283,10 @@ class LiveBackend(Backend):
             raise BackendError(f"row access policy {name} names no principal")
         for m in members:
             _check_member(m)
+        # The filter is interpolated into the statement below, so it is
+        # held to one parenthesis-balanced predicate first (a resolution
+        # such as "TRUE); DROP TABLE ...; SELECT (TRUE" would run live).
+        _checked_filter(name, filter_sql)
         grantees = ", ".join(
             '"' + m.replace("\\", "\\\\").replace('"', '\\"') + '"'
             for m in members)
@@ -2090,7 +2299,26 @@ class LiveBackend(Backend):
                         name=name, members=list(members), filter=filter_sql,
                         argv=argv, sql=sql)
 
+    def _row_policy_members(self, dataset, table, policy_id, token):
+        """The grantees of one row access policy, read back through
+        rowAccessPolicies.getIamPolicy: the members of every binding
+        with roles/bigquery.filteredDataViewer, in IAM form."""
+        url = (f"{BIGQUERY_API}/projects/{self.project}/datasets/{dataset}/"
+               f"tables/{table}/rowAccessPolicies/{policy_id}:getIamPolicy")
+        doc = self._api("POST", url, {}, token=token)
+        members = []
+        for b in doc.get("bindings") or []:
+            if b.get("role") == ROLE_FILTERED_VIEWER:
+                members.extend(m for m in (b.get("members") or [])
+                               if m not in members)
+        return members
+
     def list_row_policies(self, dataset, table):
+        """Policies from bq ls --row_access_policies, with members read
+        through the IAM policy of each one: the REST resource's grantees
+        field is input only and the listing does not return it. When the
+        IAM read fails the listing's grantees (usually none) stand in,
+        and members_source says which was used. NOT LIVE-TESTED."""
         items = parse_json_output(self._run(self._ls(
             "--row_access_policies", self._ref(dataset, table))))
         out = []
@@ -2100,7 +2328,24 @@ class LiveBackend(Backend):
             ref = item.get("rowAccessPolicyReference") or {}
             out.append({"name": ref.get("policyId") or item.get("name", ""),
                         "members": list(item.get("grantees") or []),
-                        "filter": item.get("filterPredicate", "")})
+                        "filter": item.get("filterPredicate", ""),
+                        "members_source": "list"})
+        if not out:
+            return out
+        try:
+            token = self._access_token()
+        except BackendError:
+            return out
+        for policy in out:
+            if not IDENT_RE.match(policy["name"] or ""):
+                continue
+            try:
+                members = self._row_policy_members(dataset, table,
+                                                   policy["name"], token)
+            except BackendError:
+                continue
+            policy["members"] = members
+            policy["members_source"] = "iam"
         return out
 
     # ---- data
@@ -2218,6 +2463,22 @@ def emulated_root(migration):
     return pg.TOOLS_ROOT / "bq-emulated" / check_migration_name(migration)
 
 
+def check_emulator_workspace(root, workspace):
+    """Raise BackendError when the emulator at root records a workspace
+    other than this one. No state file, or one without the key, passes."""
+    path = Path(root) / STATE_FILE
+    if not path.exists():
+        return
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return
+    stored = state.get("workspace") if isinstance(state, dict) else None
+    wanted = str(Path(workspace).resolve())
+    if stored is not None and not _same_path(stored, wanted):
+        raise BackendError(_workspace_mismatch(path, stored, wanted))
+
+
 def make_backend(bq_cfg, migration, workspace):
     mode = bq_cfg.get("mode", "emulated")
     log = OperationLog(Path(workspace) / "artifacts" / "bq-operations.log")
@@ -2225,7 +2486,7 @@ def make_backend(bq_cfg, migration, workspace):
     location = bq_cfg.get("location") or config.BQ_DEFAULTS["location"]
     if mode == "emulated":
         return EmulatedBackend(emulated_root(migration), project, location,
-                               log=log)
+                               log=log, workspace=workspace)
     if mode == "live":
         return LiveBackend(project, location, log=log,
                            work_dir=Path(workspace) / "artifacts" / "bq-work")
@@ -2316,6 +2577,10 @@ def main(argv):
             print(f"BQ-BACKEND ERROR: refusing to delete {root}; it is not "
                   f"a child of {base}", file=sys.stderr)
             return 1
+        # An emulator another workspace created under this migration name
+        # is not ours to wipe. Only the workspace is checked here: reset
+        # is the documented way out of a project or location mismatch.
+        check_emulator_workspace(root, ws)
         if root.exists():
             shutil.rmtree(root)
             print(f"removed {root}")

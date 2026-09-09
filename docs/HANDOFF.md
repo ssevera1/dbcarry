@@ -15,7 +15,7 @@ plugin: slash commands route into playbooks, playbooks call deterministic
 Python scripts for everything exact and dispatch subagents for everything
 that needs judgment. What has been proven is the **emulated** path: the
 whole pipeline runs on a laptop against an emulated BigQuery backend, the
-unit suite (690 tests) covers every v0.2.0 module plus the v0.1.0 state,
+unit suite (1000 tests) covers every v0.2.0 module plus the v0.1.0 state,
 config, pg, inventory, and checksum modules and the guard hook (cli,
 dump_restore, portable_pg, replicate, and seed_demo have no test module of
 their own and are exercised by the demo), and the acceptance block in
@@ -44,7 +44,7 @@ was built. Your first task is that first live run.
 ```
 git clone <your fork> db-drift
 cd db-drift
-python -m pytest -q -p no:cacheprovider     # expect 690 passed
+python -m pytest -q -p no:cacheprovider     # expect 1000 passed
 claude --plugin-dir .
 ```
 
@@ -65,8 +65,13 @@ What is already configured for you:
   `bq get-iam-policy`, `gcloud auth list`, `gcloud config get-value`,
   `gcloud projects get-iam-policy`, `gcloud data-catalog taxonomies list`).
   Every mutating BigQuery call the pipeline makes goes through
-  `python scripts/dbdrift.py`, which is already allowed, so the pipeline
-  itself rarely needs the list widened. Widen it for hand checks by adding
+  `scripts/dbdrift.py`. The allow rule matches the relative form
+  `python scripts/dbdrift.py ...`, which is what the pipeline runs when
+  this checkout is the project directory (the setup above). When the
+  plugin is loaded from another directory, the playbooks call
+  `python "<plugin root>/scripts/dbdrift.py"` and that absolute form is
+  not covered, so expect one permission prompt per script call or add an
+  entry for that path. Widen it for hand checks by adding
   entries such as `"Bash(bq query:*)"` or `"Bash(gcloud data-catalog
   taxonomies describe:*)"` to `permissions.allow`; put personal additions
   in `.claude/settings.local.json` and add that file to `.gitignore`.
@@ -74,14 +79,22 @@ What is already configured for you:
   `NotebookEdit`, `Bash`, and `PowerShell` that runs
   `scripts/hooks/guard_state.py`.
 - The guard hook refuses (exit 2, reason on stderr) any edit of a
-  `state.json` under a `migrations` directory and any shell command that
-  mentions `state.json` together with a redirect or an in-place writer,
-  copier, mover, or deleter. The practical consequence: never write a
-  shell command that names `state.json` and also writes somewhere; use
-  `python scripts/dbdrift.py state --migration <name> <verb>` for every
-  state change and `state show` or `state verify` to read it. The rules
-  and their tests are in `tests/test_hooks.py`; `CONTRIBUTING.md` lists
-  the markers.
+  `state.json` under a `migrations` directory (8.3 short names, symlinks,
+  and junctions are resolved first), any shell command that mentions
+  `state.json` unless every part of it is a known read-only form (`cat`,
+  `grep`, `jq`, `Get-Content`, `git diff`, the state CLI, and the like,
+  with no redirect other than to a null device and no pipe into a
+  writer), and any command that removes, moves, copies, or writes into a
+  `migrations` directory or through a glob that could match `state.json`.
+  The practical consequences: use `python scripts/dbdrift.py state
+  --migration <name> <verb>` for every state change and `state show` or
+  `state verify` to read it, and produce any report whose text quotes
+  `state.json` with the Write tool, since a shell heredoc that mentions
+  it is refused. The rules and their tests are in `tests/test_hooks.py`.
+  The hook is registered twice: `.claude/settings.json` covers this
+  checkout used as the project directory, and `hooks/hooks.json` ships
+  with the plugin so an install from another directory gets the same
+  guard through `${CLAUDE_PLUGIN_ROOT}`.
 
 Migration workspaces live under `migrations/<name>/` in the directory
 where you run Claude Code, never inside the plugin, and `migrations/` and
@@ -175,11 +188,11 @@ directory inside Claude Code.
    type the migration name, and `/db-drift:demo teardown` removes the
    `onprem` instance after you type `teardown`.
 
-How long it takes: the script steps finish in seconds each; the subagent
-phases (assess dispatches three subagents, validate dispatches two) took
-two to four minutes each in the v0.1.0 acceptance run, and the gate waits
-are yours. The v0.2.0 timings belong in the acceptance block of
-`README.md`.
+How long it takes: the script steps finish in seconds each (the whole
+655,000-row load took 14 s emulated); the subagent phases took 5 min 30 s
+(assess, three subagents) and 6 min 1 s (validate, two subagents) in the
+v0.2.0 acceptance run recorded in `README.md`, and the gate waits are
+yours.
 
 ## Switch to live mode
 
@@ -288,7 +301,7 @@ documentation says the CLIs accept; nobody has yet watched it succeed.
 | Subagent charters | `agents/*.md` | same |
 | Provider contracts | `skills/provider-*/SKILL.md` | same |
 | Demo data and planted findings | `scripts/db_drift/seed_demo.py`, `demo/scenario.md`, fixtures `tests/fixtures/demo-inventory.json` and `demo-security.json` | every `demo_*` fixture test |
-| Permission allowlist and the guard hook | `.claude/settings.json`, `scripts/hooks/guard_state.py` | `tests/test_hooks.py` |
+| Permission allowlist and the guard hook | `.claude/settings.json`, `hooks/hooks.json`, `scripts/hooks/guard_state.py` | `tests/test_hooks.py` |
 
 `CONTRIBUTING.md` describes the workflow for a new mapping rule (code,
 rulebook, reviewer prose, test, and a planted demo finding when needed).

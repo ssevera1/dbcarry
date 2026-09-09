@@ -99,7 +99,8 @@ WIDE_PG_RAW = {
     "dt__nonnull": 2, "dt__min": "2025-01-01T12:00:00.000000",
     "dt__max": "2025-01-01T13:00:00.500000",
     "t__nonnull": 2,
-    "blob__nonnull": 2,
+    # bytes are measured with octet_length; AP8= is two bytes, AA== one
+    "blob__nonnull": 2, "blob__len_sum": 3,
     "attributes__nonnull": 2,
     "tags__nonempty": 1,
     "code__nonnull": 2, "code__len_sum": 10, "code__min": "ab   ",
@@ -138,7 +139,7 @@ WIDE_NORMALIZED = {
         "dt": {"nonnull": "2", "min": "2025-01-01T12:00:00.000000",
                "max": "2025-01-01T13:00:00.500000"},
         "t": {"nonnull": "2"},
-        "blob": {"nonnull": "2"},
+        "blob": {"nonnull": "2", "len_sum": "3"},
         "attributes": {"nonnull": "2"},
         "tags": {"nonempty": "1"},
         "code": {"nonnull": "2", "len_sum": "10", "min": "ab   ",
@@ -224,7 +225,7 @@ def test_metrics_per_class():
     assert v.metrics_for(by["region"]) == ["nonnull", "len_sum", "min", "max"]
     assert v.metrics_for(by["active"]) == ["nonnull", "true_count"]
     assert v.metrics_for(by["ordered_at"]) == ["nonnull", "min", "max"]
-    assert v.metrics_for(by["blob"]) == ["nonnull"]
+    assert v.metrics_for(by["blob"]) == ["nonnull", "len_sum"]
     assert v.metrics_for(by["t"]) == ["nonnull"]
     assert v.metrics_for(by["attributes"]) == ["nonnull"]
     # BigQuery stores a NULL array as an empty array, so the only count
@@ -268,6 +269,7 @@ def test_pg_fingerprint_sql_text():
         "'YYYY-MM-DD') ELSE (max(\"d\"))::text END AS \"c8__max\"",
         'count(*) FILTER (WHERE "active") AS "c7__true_count"',
         'count("blob") AS "c11__nonnull"', 'count("t") AS "c10__nonnull"',
+        'sum(octet_length("blob")) AS "c11__len_sum"',
         'count("attributes") AS "c12__nonnull"',
         'count(*) FILTER (WHERE cardinality("tags") > 0) AS "c13__nonempty"',
         # char(n) pads on output, so the source pads too before measuring
@@ -398,6 +400,7 @@ def test_bq_fingerprint_sql_text():
         "FORMAT_DATE('%Y-%m-%d', MIN(`d`)) AS `d__min`",
         "COUNTIF(`active`) AS `active__true_count`",
         "COUNT(`blob`) AS `blob__nonnull`", "COUNT(`t`) AS `t__nonnull`",
+        "SUM(LENGTH(`blob`)) AS `blob__len_sum`",
         "COUNTIF(ARRAY_LENGTH(`tags`) > 0) AS `tags__nonempty`",
         "SUM(LENGTH(`code`)) AS `code__len_sum`",
     ]:
@@ -1101,3 +1104,38 @@ def test_cli_compare_survives_a_cp1252_console(tmp_path, monkeypatch):
         {"column": "region", "metric": "max", "left": "eu", "right": "中"}]
     printed = json.loads(buf.getvalue().decode("cp1252"))
     assert printed == report
+
+
+def test_bytes_length_agrees_across_the_three_paths():
+    """BYTES columns carry a byte length sum on every side: octet_length
+    on PostgreSQL, LENGTH over BYTES on BigQuery, and the decoded base64
+    length over NDJSON in the emulator."""
+    spec = v.fingerprint_spec([col("blob", "bytea", "bytea", 1)])
+    assert spec[0]["class"] == "other" and spec[0]["bq_type"] == "BYTES"
+    assert v.metrics_for(spec[0]) == ["nonnull", "len_sum"]
+    pg_sql = v.pg_fingerprint_sql("public", "t", spec)
+    assert 'sum(octet_length("blob")) AS "c0__len_sum"' in pg_sql
+    assert 'count("blob") AS "c0__nonnull"' in pg_sql
+    bq_sql = v.bq_fingerprint_sql("proj", "retail", "t", spec)
+    assert "SUM(LENGTH(`blob`)) AS `blob__len_sum`" in bq_sql
+    # 0x00 0xFF (2 bytes), 0x00 (1 byte), "hello" (5 bytes), null
+    rows = [{"blob": "AP8="}, {"blob": "AA=="}, {"blob": "aGVsbG8="},
+            {"blob": None}]
+    raw = v.fingerprint_from_rows(rows, spec)
+    assert raw == {"rows": 4, "blob__nonnull": 3, "blob__len_sum": 8}
+    # what PostgreSQL and BigQuery report for the same bytes normalizes
+    # to the same fingerprint
+    pg_raw = v.expand_pg_aliases({"rows": 4, "c0__nonnull": 3,
+                                  "c0__len_sum": 8}, spec)
+    bq_raw = {"rows": "4", "blob__nonnull": "3", "blob__len_sum": "8"}
+    assert v.normalize(raw, spec) == v.normalize(pg_raw, spec) == \
+        v.normalize(bq_raw, spec) == {
+            "rows": "4", "columns": {"blob": {"nonnull": "3",
+                                              "len_sum": "8"}}}
+    assert v.compare(v.normalize(pg_raw, spec), v.normalize(raw, spec),
+                     spec)["match"] is True
+    # an empty column reports no length, like the SQL sum of nothing
+    assert v.fingerprint_from_rows([{"blob": None}], spec) == {
+        "rows": 1, "blob__nonnull": 0, "blob__len_sum": None}
+    with pytest.raises(ValueError):
+        v.fingerprint_from_rows([{"blob": "not base64!"}], spec)

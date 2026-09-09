@@ -167,6 +167,15 @@ column ACLs, role inheritance) MySQL lacks in the same form.
 
 ## Smaller items, no order
 
+Finding codes added in the post-acceptance review round, for readers of
+older reports: `bq_schema` emits `view_resolution_ignored`,
+`view_resolution_unjustified`, and `view_resolution_stale`, and
+`bq_security` emits `translation_resolution_ignored`,
+`translation_resolution_unjustified`, `translation_resolution_stale`,
+`translation_resolution_malformed`, `column_grant_unknown_column`, and
+`public_rls_denied`; `bq-security verify` gained the `*_extra` checks at
+project, dataset, and table scope and `dataset_owner_identity`.
+
 - `--exclude-schema` for `inventory`, `objcount`, and `checksum snapshot`
   so managed Postgres targets that add their own schemas do not show as
   drift (noted in `skills/provider-gcp/SKILL.md` since v0.1.0).
@@ -178,7 +187,24 @@ column ACLs, role inheritance) MySQL lacks in the same form.
   ANSI code page, so a table or column name outside ASCII cannot be
   exported or fingerprinted there; the fix is to pass every statement
   through stdin, which `bq_validate` already does.
-- Precision beyond 15 significant digits in the emulator's fingerprints.
-  Real BigQuery keeps NUMERIC exact; the emulator reads NDJSON with Decimal
-  today, so this is a watch item rather than a bug, but a test that pins
-  it would be cheap.
+- Workforce-pool principals (`principal://`, `principalSet://`) in the
+  principal map. The backend's member check accepts six kinds today; the
+  seam is `_check_member` in `bq_backend.py` and `canonical_principal`
+  in `bq_security.py`, plus the IAM member form in `_member_to_access`.
+- Content-level BYTES validation. Fingerprints check null count and byte
+  length for BYTES; a cross-engine hash of the base64 text would close
+  the gap. Seam: `fingerprint_spec` in `bq_validate.py`.
+- Freshness of `security-verify.json` before a load. `bq-load` in live
+  mode refuses without a passing verify artifact but does not check its
+  age, so after a rollback that recreated the datasets a stale pass file
+  would let a load run before the controls are re-applied. The state
+  machine orders the phases, so the exposure needs a rollback plus a
+  manual `bq-load`; the fix is a timestamp and the taxonomy name in the
+  verify artifact, refused when `schema-applied.json` or
+  `security-plan.json` is newer. Seam: `security_verified` in
+  `bq_load.py`.
+- Locking in the emulator. Two `bq-load` runs on one table at the same
+  time each see an empty table and both append; the state file is now
+  written atomically, but nothing serializes loads. A lock file under the
+  emulator root for the duration of a load would close it. Seam:
+  `EmulatedBackend.load_ndjson` in `bq_backend.py`.

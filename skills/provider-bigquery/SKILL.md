@@ -37,7 +37,14 @@ the mode itself; only the prerequisite check and the teardown differ.
   `~/.db-drift`). `state.json` there holds datasets, tables and their
   schemas, IAM bindings, dataset access lists, taxonomies, policy tags,
   and row access policies; `data/<dataset>/<table>.ndjson.gz` holds the
-  loaded rows.
+  loaded rows, line for line as exported (numbers are read as Decimal,
+  so NUMERIC and BIGNUMERIC fingerprints are exact). The state file also
+  records the workspace that created it: a second working directory
+  with the same migration name is refused with both paths named (pick
+  another name, or reset from the recorded workspace), and a state file
+  from before this key is adopted on first open. Writes are atomic
+  (temp file and rename); two loads of one table at the same time are
+  not guarded against each other.
 - What it proves: the pipeline's own logic, end to end. Plan output,
   apply order, idempotent re-apply, read-back verification, and the
   structural enforcement rules the pipeline relies on: a tagged column
@@ -57,8 +64,12 @@ the mode itself; only the prerequisite check and the teardown differ.
   `bq load` accepts the NDJSON. Label every emulated number as emulated.
 - The emulator's state file is also named `state.json`. The PreToolUse
   hook blocks any shell redirect into a file by that name, and hand
-  edits are never acceptable anyway. `bq-backend reset --yes` is the one
-  sanctioned way to clear it.
+  edits are never acceptable anyway. `bq-backend reset --yes`, run from
+  the workspace the state file records, is the one sanctioned way to
+  clear it.
+- A `bytea[]` column exports as an array of base64 strings (each
+  element encoded the way a scalar bytea is), so `bq load` reads it as
+  `ARRAY<BYTES>`.
 
 ### live
 
@@ -206,8 +217,9 @@ migration name first (rollback playbook step 2).
 
 Emulated: `python "$SCRIPTS" bq-backend reset --migration <name> --yes`
 removes `~/.db-drift/bq-emulated/<name>/` and refuses any path that is
-not a direct child of `bq-emulated`. Without `--yes` it prints what it
-would delete and exits 2.
+not a direct child of `bq-emulated`, and refuses when the state file
+records a different workspace than the one running the command. Without
+`--yes` it prints what it would delete and exits 2.
 
 Live: no `bq-*` verb performs a live teardown; the rollback playbook
 runs these, in this order, and records each output:

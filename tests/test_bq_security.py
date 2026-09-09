@@ -879,17 +879,17 @@ def test_render_apply_scripts(demo_sec, demo_inv):
                             "50-row-policies.sql", "70-identity-notes.md"}
     iam = scripts["30-iam.sh"]
     assert iam.startswith("#!/usr/bin/env bash")
-    assert ("gcloud projects add-iam-policy-binding proj "
-            f"--member={RW} --role={bs.ROLE_JOBUSER} --condition=None") in iam
-    assert (f"bq --project_id=proj add-iam-policy-binding --member={RW} "
-            f"--role={bs.ROLE_EDITOR} proj:retail.orders") in iam
+    assert ("gcloud projects add-iam-policy-binding 'proj' "
+            f"--member='{RW}' --role='{bs.ROLE_JOBUSER}' --condition=None") in iam
+    assert (f"bq --project_id='proj' add-iam-policy-binding --member='{RW}' "
+            f"--role='{bs.ROLE_EDITOR}' 'proj:retail.orders'") in iam
     assert '"groupByEmail": "retail-app-ro@example.com"' in iam
     assert '"tableId": "recent_orders"' in iam
     tags = scripts["40-policy-tags.sh"]
     assert "FINE_GRAINED_ACCESS_CONTROL" in tags and "dbdrift_demo" in tags
     assert "customers__email" in tags
     assert "policy-tags add-iam-policy-binding" in tags
-    assert f"--member={RW} --role={bs.ROLE_FGR}" in tags
+    assert f"--member='{RW}' --role={bs.ROLE_FGR}" in tags
     assert "print-access-token" in tags and "Bearer" in tags
     sql = scripts["50-row-policies.sql"]
     assert ("CREATE OR REPLACE ROW ACCESS POLICY rls_reporting ON "
@@ -2282,8 +2282,10 @@ def test_verify_flags_extra_row_policies_and_tag_readers(tmp_path, demo_sec,
     verdict = bs.verify_plan(plan, backend)
     assert verdict["pass"] is False
     failed = {c["name"]: c for c in verdict["checks"] if not c["pass"]}
-    assert set(failed) == {"row_policy_extra:retail.orders/rls_everyone",
-                           f"tag_reader_extra:customers__email:{EVERYONE}"}
+    assert set(failed) == {
+        "row_policy_extra:retail.orders/rls_everyone",
+        f"tag_reader_extra:customers__email:{EVERYONE}",
+        f"table_binding_extra:retail.customers:{bs.ROLE_VIEWER}:{EVERYONE}"}
     assert failed["row_policy_extra:retail.orders/rls_everyone"][
         "expected"] == "absent"
     assert EVERYONE in failed["row_policy_extra:retail.orders/rls_everyone"][
@@ -2322,3 +2324,289 @@ def test_cli_probes_skipped_without_probes(tmp_path, monkeypatch, capsys,
     assert rc == 0
     doc = read_json(art / "security-probes.json")
     assert doc["ran"] is False and doc["skipped"] is True
+
+
+# ------------------------------------------------ review round 2 fixes
+
+def test_verify_flags_extra_bindings_at_every_scope(tmp_path, demo_sec,
+                                                     demo_inv):
+    plan = demo_plan(demo_sec, demo_inv)
+    backend = build_emulator(tmp_path, demo_inv)
+    bs.apply_plan(plan, backend)
+    assert bs.verify_plan(plan, backend)["pass"] is True
+    backend.add_dataset_access("retail", {"role": bs.ROLE_VIEWER,
+                                          "member": EVERYONE})
+    backend.add_dataset_access("retail", {"role": bs.ROLE_OWNER,
+                                          "member": "user:evil@example.com"})
+    backend.add_table_binding("retail", "customers", bs.ROLE_VIEWER, EVERYONE)
+    # the emulator refuses allUsers through its API; tamper the state
+    state = read_state(tmp_path)
+    state["project_bindings"].append({"role": bb.ROLE_ADMIN,
+                                      "member": "allUsers"})
+    state["project_bindings"].append({"role": bs.ROLE_VIEWER,
+                                      "member": "user:owner@example.com"})
+    state["datasets"]["retail"]["access"].append({"view": "retail.exfil"})
+    write_state(tmp_path, state)
+    backend = bb.EmulatedBackend(tmp_path / "emu", PROJECT, "US")
+    verdict = bs.verify_plan(plan, backend)
+    assert verdict["pass"] is False
+    failed = {c["name"]: c for c in verdict["checks"] if not c["pass"]}
+    assert set(failed) == {
+        f"dataset_access_extra:retail:{bs.ROLE_VIEWER}:{EVERYONE}",
+        f"dataset_access_extra:retail:{bs.ROLE_OWNER}:user:evil@example.com",
+        f"table_binding_extra:retail.customers:{bs.ROLE_VIEWER}:{EVERYONE}",
+        f"project_binding_extra:{bb.ROLE_ADMIN}:allUsers",
+        "authorized_view_extra:retail:retail.exfil"}
+    assert all(c["expected"] == "absent" for c in failed.values())
+    # a project binding for an ordinary member is not pipeline-owned
+    assert not [n for n in failed if "owner@example.com" in n]
+
+
+def test_verify_flags_a_retired_role_still_bound(tmp_path, demo_sec,
+                                                  demo_inv):
+    backend = build_emulator(tmp_path, demo_inv)
+    bs.apply_plan(demo_plan(demo_sec, demo_inv), backend)
+    pmap = copy.deepcopy(PRINCIPAL_MAP)
+    pmap["roles"]["app_ro"]["principal"] = ""
+    plan = demo_plan(demo_sec, demo_inv, pmap=pmap)
+    assert findings(plan, "unmapped_role")
+    bs.apply_plan(plan, backend)
+    verdict = bs.verify_plan(plan, backend)
+    assert verdict["pass"] is False
+    names = {c["name"] for c in verdict["checks"] if not c["pass"]}
+    assert f"dataset_access_extra:retail:{bs.ROLE_VIEWER}:{RO}" in names
+    # project IAM is not pipeline-owned, so the stale jobUser binding is
+    # not an extra; the dataset entry is what grants data access
+    assert not [n for n in names if n.startswith("project_binding_extra")]
+
+
+def test_verify_live_defaults_are_not_extras(tmp_path, demo_sec, demo_inv):
+    plan = demo_plan(demo_sec, demo_inv, cfg=dict(BQ_CFG, mode="live"))
+    backend = build_emulator(tmp_path, demo_inv)
+    bs.apply_plan(plan, backend)
+    for group in bb.PROJECT_SPECIAL_GROUPS:
+        backend.add_dataset_access("retail", {
+            "role": bs.ROLE_VIEWER, "member": f"specialGroup:{group}"})
+    backend.add_dataset_access("retail", {
+        "role": bs.ROLE_OWNER, "member": "user:creator@example.com"})
+    verdict = bs.verify_plan(plan, backend)
+    assert verdict["pass"] is True
+    owner = [c for c in verdict["checks"]
+             if c["name"].startswith("dataset_owner_identity:")]
+    assert owner and owner[0]["pass"] is True
+    assert "creator@example.com" in owner[0]["name"]
+    # the same owner entry in emulated mode is an extra
+    plan = demo_plan(demo_sec, demo_inv)
+    names = {c["name"] for c in bs.verify_plan(plan, backend)["checks"]
+             if not c["pass"]}
+    assert (f"dataset_access_extra:retail:{bs.ROLE_OWNER}:"
+            "user:creator@example.com") in names
+
+
+def test_public_column_grant_gets_a_tag_not_full_read():
+    inv = small_inventory()
+    sec = small_security(
+        relation_privileges=[rel("customers", "app_ro", "SELECT"),
+                             rel("customers", "app_rw", "SELECT")],
+        column_privileges=[{"schema": "public", "relation": "customers",
+                            "column": "id", "grantee": "PUBLIC",
+                            "privilege": "SELECT"}])
+    cfg = dict(BQ_CFG, public_principal=EVERYONE)
+    plan = bs.plan_security(sec, inv, cfg, PRINCIPAL_MAP)
+    tags = plan["policy_tags"]
+    assert len(tags) == 1
+    assert [c["column"] for c in tags[0]["columns"]] == ["email", "full_name"]
+    readers = {r["member"] for r in tags[0]["readers"]}
+    assert readers == {RO, RW}
+    mine = [b for b in bindings_for(plan, EVERYONE)
+            if b["role"] == bs.ROLE_VIEWER]
+    assert mine and "policy tag" in mine[0]["reason"]
+    assert "covers every column" not in mine[0]["reason"]
+    # without a public principal the PUBLIC grant still folds into every
+    # role (reporting reads id only, so the tag stays), but no principal
+    # stands for PUBLIC itself
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP)
+    assert not bindings_for(plan, EVERYONE)
+    assert EVERYONE not in {r["member"] for t in plan["policy_tags"]
+                            for r in t["readers"]}
+
+
+def test_resolution_is_ignored_for_auto_and_stale_predicates():
+    inv = small_inventory()
+    sec = small_security(
+        rls=[rls("orders")],
+        policies=[policy("orders", "eu", ["app_ro"], "(region = 'eu'::text)")],
+        relation_privileges=[rel("orders", "app_ro", "SELECT")])
+    res = {"policies": {"public.orders/eu": {"sql": "TRUE",
+                                             "rationale": "open it"}}}
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+    pol = plan["row_policies"][0]
+    assert pol["filter"] == "(region = 'eu')" and pol["confidence"] == "auto"
+    warn = findings(plan, "translation_resolution_ignored")
+    assert warn and warn[0]["severity"] == "WARNING"
+    # a review predicate whose resolution names another source predicate
+    sec["policies"] = [policy("orders", "tenant", ["app_ro"],
+                              TENANT_USING + " AND (status = 'paid'::text)")]
+    res = {"policies": {"public.orders/tenant": {
+        "sql": "(tenant_id = 7)", "rationale": "reviewed",
+        "source_sql": TENANT_USING}}}
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+    pol = plan["row_policies"][0]
+    assert pol["confidence"] == "review"
+    assert findings(plan, "translation_resolution_stale")[0][
+        "severity"] == "WARNING"
+    assert bs.review_items(plan)
+    # the same resolution with the matching source_sql is accepted
+    res["policies"]["public.orders/tenant"]["source_sql"] = \
+        TENANT_USING + " AND (status = 'paid'::text)"
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+    assert plan["row_policies"][0]["confidence"] == "resolved"
+    # a resolution without a rationale is not accepted
+    res["policies"]["public.orders/tenant"]["rationale"] = ""
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+    assert plan["row_policies"][0]["confidence"] == "review"
+    assert findings(plan, "translation_resolution_unjustified")
+
+
+def test_resolution_must_be_one_balanced_expression():
+    inv = small_inventory()
+    sec = small_security(
+        rls=[rls("orders")],
+        policies=[policy("orders", "tenant", ["app_ro"], TENANT_USING)],
+        relation_privileges=[rel("orders", "app_ro", "SELECT")])
+    for bad in ["a = 1) OR (1 = 1",
+                "TRUE); DROP TABLE `proj.retail.orders`; SELECT (TRUE",
+                "(tenant_id = 7);"]:
+        res = {"policies": {"public.orders/tenant": {
+            "sql": bad, "rationale": "crafted"}}}
+        plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+        assert plan["row_policies"][0]["confidence"] == "review", bad
+        assert findings(plan, "translation_resolution_malformed"), bad
+    res = {"policies": {"public.orders/tenant": {
+        "sql": "(status = ');') AND (tenant_id = 7)", "rationale": "ok"}}}
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP, res)
+    assert plan["row_policies"][0]["confidence"] == "resolved"
+
+
+def test_open_rls_table_probe_expects_zero_and_apply_refuses(tmp_path):
+    inv = small_inventory()
+    sec = small_security(
+        rls=[rls("orders")],
+        relation_privileges=[rel("orders", "app_ro", "SELECT")])
+    cfg = dict(BQ_CFG, admin_principal="")
+    plan = bs.plan_security(sec, inv, cfg, PRINCIPAL_MAP)
+    assert findings(plan, "rls_deny_all_unassigned")
+    probes = bs.probe_set(plan, sec, inv, PRINCIPAL_MAP, cfg)
+    probe = one(probes, "app_ro", "row_count", "orders")
+    assert probe["expected"]["row_count"] == 0
+    backend = bb.EmulatedBackend(tmp_path / "emu", PROJECT, "US")
+    with pytest.raises(bs.SecurityPlanError, match="rls_deny_all_unassigned"):
+        bs.apply_plan(plan, backend)
+    assert backend.list_datasets() == []
+
+
+def test_apply_and_render_accept_only_known_confidences(demo_sec, demo_inv):
+    for value in ["Review", "REVIEW", "needs_review", "", None, "pending"]:
+        plan = demo_plan(demo_sec, demo_inv)
+        plan["row_policies"][0]["confidence"] = value
+        with pytest.raises(bs.SecurityPlanError, match="confidence"):
+            bs.refuse_unresolved(plan)
+        sql = bs.render_apply_scripts(plan, BQ_CFG)["50-row-policies.sql"]
+        stmt = [l for l in sql.splitlines()
+                if plan["row_policies"][0]["name"] in l
+                and "CREATE OR REPLACE" in l]
+        assert stmt and all(l.startswith("-- ") for l in stmt), value
+        with pytest.raises(bs.SecurityPlanError, match="confidence"):
+            bs.check_plan(plan)
+
+
+def test_column_grant_on_unknown_column_is_not_bound():
+    inv = small_inventory()
+    sec = small_security(
+        relation_privileges=[rel("customers", "app_rw", "SELECT")],
+        column_privileges=[{"schema": "public", "relation": "customers",
+                            "column": "ssn", "grantee": "app_ro",
+                            "privilege": "SELECT"}])
+    plan = bs.plan_security(sec, inv, BQ_CFG, PRINCIPAL_MAP)
+    assert not [b for b in bindings_for(plan, RO)
+                if b["role"] in bb.DATA_READ_ROLES]
+    warn = findings(plan, "column_grant_unknown_column")
+    assert warn and warn[0]["severity"] == "WARNING"
+    assert "ssn" in warn[0]["message"]
+
+
+def test_principal_case_variants_are_one_principal():
+    inv = small_inventory()
+    sec = small_security(
+        relation_privileges=[rel("customers", "app_rw", "SELECT")],
+        column_privileges=[{"schema": "public", "relation": "customers",
+                            "column": "id", "grantee": "app_ro",
+                            "privilege": "SELECT"}])
+    pmap = {"roles": {
+        "app_ro": {"principal": "group:Team@Example.com"},
+        "app_rw": {"principal": "group:team@example.com"},
+        "reporting": {"principal": ""}}}
+    plan = bs.plan_security(sec, inv, BQ_CFG, pmap)
+    assert plan["principals"] == {"app_ro": "group:team@example.com",
+                                  "app_rw": "group:team@example.com"}
+    assert findings(plan, "principal_shared")
+    members = {b["member"] for b in plan["bindings"]}
+    assert members == {"group:team@example.com"}
+    assert {r["member"] for t in plan["policy_tags"]
+            for r in t["readers"]} == {"group:team@example.com"}
+
+
+def test_cli_probes_no_source_is_labeled(tmp_path, monkeypatch, capsys,
+                                         demo_inv):
+    ws = make_workspace(tmp_path, monkeypatch)
+    art = ws / "artifacts"
+    assert run(["plan", "--root", str(tmp_path), "--migration", "demo"]) == 0
+    backend = bb.make_backend(BQ_CFG, "demo", ws)
+    create_demo_objects(backend, demo_inv)
+    assert run(["apply", "--root", str(tmp_path), "--migration", "demo"]) == 0
+    load_demo_rows(backend, tmp_path)
+    capsys.readouterr()
+    rc = run(["probes", "--root", str(tmp_path), "--migration", "demo",
+              "--run", "--no-source"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert ("SECURITY PROBES PASSED (emulated, status only, counts not "
+            "compared)") in out
+    doc = read_json(art / "security-probes.json")
+    assert doc["source_compared"] is False and doc["pass"] is True
+
+
+def test_render_quotes_members_and_planner_rejects_metacharacters(
+        demo_sec, demo_inv):
+    plan = demo_plan(demo_sec, demo_inv)
+    scripts = bs.render_apply_scripts(plan, BQ_CFG)
+    assert f"--member='{RW}'" in scripts["30-iam.sh"]
+    assert f"--member='{RW}'" in scripts["40-policy-tags.sh"]
+    pmap = copy.deepcopy(PRINCIPAL_MAP)
+    pmap["roles"]["app_ro"]["principal"] = "group:x$(id)@example.com;pwned"
+    with pytest.raises(bs.SecurityPlanError, match="app_ro"):
+        demo_plan(demo_sec, demo_inv, pmap=pmap)
+
+
+def test_public_rls_policy_is_noted_for_the_public_principal():
+    inv = small_inventory()
+    sec = small_security(
+        rls=[rls("orders")],
+        policies=[policy("orders", "eu", ["PUBLIC"], "(region = 'eu'::text)")],
+        relation_privileges=[rel("orders", "PUBLIC", "SELECT")])
+    cfg = dict(BQ_CFG, public_principal=EVERYONE)
+    plan = bs.plan_security(sec, inv, cfg, PRINCIPAL_MAP)
+    info = findings(plan, "public_rls_denied")
+    assert info and info[0]["severity"] == "INFO"
+    assert "public.orders" in info[0]["subject"]
+    assert not [p for p in plan["row_policies"] if EVERYONE in p["members"]]
+
+
+def test_cli_plan_rejects_malformed_resolutions(tmp_path, monkeypatch,
+                                                capsys):
+    ws = make_workspace(tmp_path, monkeypatch)
+    (ws / "artifacts" / "translation-resolutions.json").write_text(
+        json.dumps({"views": {}, "policies": []}), encoding="utf-8")
+    rc = run(["plan", "--root", str(tmp_path), "--migration", "demo"])
+    err = capsys.readouterr().err
+    assert rc == 1 and "policies" in err and "object" in err

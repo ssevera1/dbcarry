@@ -29,6 +29,21 @@ Checks, all mandatory:
 5. Matviews: row count of each matview on both sides, equal and
    non-zero.
 
+Provider bigquery (the dispatch prompt names it): checks 1, 3, 4, and 5
+do not apply, because checksums cannot cross engines, BigQuery has no
+constraints or indexes to count, the emulator has no SQL engine, and
+BigQuery maintains materialized views itself. Run instead, all
+mandatory, with the exact commands the prompt gives:
+1b. `bq-validate fingerprint` on both sides and `bq-validate compare`:
+    match true on every table, nothing in missing_in_left or
+    missing_in_right; inspect every column and metric yourself.
+3b. `bq-schema verify`: tables and views equal the plan.
+4b. artifacts/load-report.json: exported equals loaded on every table,
+    pass true, forced false.
+Check 2 stays. Say plainly what the fingerprints do not cover. In
+emulated mode every table header and the verdict line end with
+"(emulated)".
+
 Write <workspace>/artifacts/06-validation.md: a table of every check
 with PASS or FAIL and its evidence (the numbers, not adjectives), a
 mismatch drill-down for any FAIL, and a final verdict line:

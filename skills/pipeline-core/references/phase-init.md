@@ -37,8 +37,9 @@ workspace exists.
    - binding granularity: `auto` (default), `dataset`, or `table`.
    - gcs bucket: default empty, so bq load reads the local export
      files; live mode only.
-   Principals are `user:`, `group:`, or `serviceAccount:`; allUsers and
-   allAuthenticatedUsers are refused by the planner.
+   Recommended principal types are `user:`, `group:`, and
+   `serviceAccount:`; `domain:` and `specialGroup:` are accepted;
+   allUsers and allAuthenticatedUsers are refused by the planner.
 4. Run `python "$SCRIPTS" state --migration <name> init
    --engine <engine> --provider <provider>`.
 

@@ -166,8 +166,13 @@ def test_export_sql_keeps_bytea_base64_on_one_line():
             in sql)
     assert "\n" not in sql
     assert bl.copy_command(sql).startswith("\\copy (SELECT row_to_json(r)")
+    # a bytea[] exports one base64 string per element (to_json would
+    # render hex text, which bq load rejects for ARRAY<BYTES>)
     tags = col("tags", "ARRAY", "_bytea", 2, table="t", element_type="bytea")
-    assert 'to_json("tags") AS "tags"' in bl.export_sql("public", "t", [tags])
+    sql = bl.export_sql("public", "t", [tags])
+    assert ("(SELECT to_json(array_agg(translate(encode(e, 'base64'), "
+            "E'\\n', ''))) FROM unnest(\"tags\") e) AS \"tags\"") in sql
+    assert "\n" not in sql
 
 
 def test_export_sql_aliases_and_quoting():

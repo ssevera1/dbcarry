@@ -25,7 +25,7 @@ order_items 300000, audit_log 50000.
 | orders.region column with values us-east, us-west, eu | DDL | the row-level security predicate target |
 | orders has RLS enabled; policy orders_region_eu FOR SELECT TO reporting USING (region = 'eu') | POST | security inventory; auto-translated BigQuery row access policy rls_reporting |
 | policy orders_all_rw ON orders TO app_rw USING (true) | POST | row access policy rls_app_rw with FILTER USING (TRUE); demonstrates that once any policy exists, unnamed principals see no rows |
-| audit_log has RLS enabled; policy audit_self FOR SELECT TO app_ro USING (actor = current_user) | POST | translation to SESSION_USER() with an identity-format note; probe expects zero rows because actors are role-style names, not emails |
+| audit_log has RLS enabled; policy audit_self FOR SELECT TO app_ro USING (actor = current_user) | POST | translation to SESSION_USER() with an identity-format note; probe reports the target count (zero, because actors are role-style names, not emails) without comparing it to the source: expected.row_count null with the identity note |
 | policy audit_all_rw ON audit_log TO app_rw USING (true) | POST | row access policy rls_app_rw on audit_log |
 | app_ro loses table SELECT on customers and gets column SELECT on (id, full_name, created_at) | POST | restricted column customers.email; policy tag customers__email readable by app_rw only; app_ro keeps dataViewer on the table |
 | GRANT app_ro TO reporting | POST | membership flattening: reporting inherits app_ro's privileges and policies (audit_self applies to reporting too) |

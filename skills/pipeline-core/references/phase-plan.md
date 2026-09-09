@@ -64,8 +64,9 @@ phase is genuinely done; report that and move on to provision.
 3. Read <workspace>/security/principal-map.yaml (written by assess).
    For every role whose principal is empty, ask the operator
    (AskUserQuestion) for a principal now or confirm that it stays
-   unmapped, and edit the file with the answers. Principals are
-   `user:`, `group:`, or `serviceAccount:`; allUsers and
+   unmapped, and edit the file with the answers. Recommended
+   principal types are `user:`, `group:`, and `serviceAccount:`;
+   `domain:` and `specialGroup:` are accepted; allUsers and
    allAuthenticatedUsers are refused by the planner.
 4. Translate and plan:
    `python "$SCRIPTS" bq-schema translate --migration <name>`
@@ -84,8 +85,10 @@ phase is genuinely done; report that and move on to provision.
    non-empty, dispatch the sql-translator subagent with: the workspace
    path, the review file path, the output path
    artifacts/translation-resolutions.json and its shape
-   {"views": {"schema.name": {"sql", "rationale"}}, "policies":
-   {"schema.table/policy": {"sql", "rationale"}}}, and the path
+   {"views": {"schema.name": {"sql", "rationale", "source_sql"}},
+   "policies": {"schema.table/policy": {"sql", "rationale",
+   "source_sql"}}} (source_sql copied from the review item, so a
+   stale resolution is rejected), and the path
    ${CLAUDE_PLUGIN_ROOT}/skills/security-mapping/references/rls-translation.md.
    Write its JSON reply verbatim to that path (the agent has no write
    tool). Then run both step 4 commands again: they

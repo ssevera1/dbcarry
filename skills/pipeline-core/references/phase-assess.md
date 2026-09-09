@@ -56,7 +56,9 @@ Nothing beyond steps 1-5. Continue at step 8.
    artifacts/translation-review.json. Read findings[] in
    schema-plan.json (severity, code, subject, message, action). The
    WARNING codes are type_warning, primary_key_dropped,
-   foreign_key_dropped, matview_as_view, and view_review. The plan
+   foreign_key_dropped, matview_as_view, view_review, and the three
+   resolution rejections view_resolution_ignored,
+   view_resolution_unjustified, and view_resolution_stale. The plan
    phase runs translate again; this run only feeds the risk register.
 
 ## All providers

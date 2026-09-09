@@ -93,27 +93,42 @@ validates each transition against the phase and gate table and appends to
 what ran and lets a gate be skipped.
 
 `scripts/hooks/guard_state.py`, wired as a PreToolUse hook in
-`.claude/settings.json` for the Edit, Write, MultiEdit, NotebookEdit,
+`.claude/settings.json` (this checkout as the project directory) and in
+`hooks/hooks.json` (shipped with the plugin, through
+`${CLAUDE_PLUGIN_ROOT}`) for the Edit, Write, MultiEdit, NotebookEdit,
 Bash, and PowerShell tools, enforces this. It exits 2 (blocking the call
-and explaining why on stderr) when an Edit, Write, MultiEdit, or
-NotebookEdit targets a `state.json` under a `migrations` directory (the
-last path component is read the way Windows opens it, so trailing spaces
-or dots and a `::$DATA` stream suffix do not evade it), or when a Bash or
-PowerShell command mentions `state.json` and either redirects output into
-a state.json (`>`, `>>`, `>|`, `1>`, `2>`, `&>`, or dd's `of=`; the target
-may mix quoted and bare segments such as `"$WS"/state.json`) or contains
-an in-place editor, copier, mover, writer, or deleter anywhere: `sed` with
-any in-place flag (`-i`, `-Ei`, `-i.bak`, `--in-place`, `-e ... -i`),
-`perl -i` in any cluster (`-pi`, `-i.bak`), `cp`, `mv`, `copy`, `move`,
-`rm`, `del`, `tee`, `truncate`, `Set-Content`, `Add-Content`,
-`Clear-Content`, `Out-File`, `Copy-Item`, `Move-Item`, or `Remove-Item`.
-The markers are over-inclusive on purpose: a command that removes a build
-directory and then reads a state.json is refused too, and the fix is to
-split it. Reads, `git`, the state CLI itself, redirects that land
-elsewhere (`cat migrations/x/state.json 2>>errors.log`), and sibling
-files such as `state.json.bak` pass through. Bad or unexpected input allows the call
-(exit 0) so the hook can never wedge a session. `decide(payload)` is
-pure and tested in `tests/test_hooks.py`; extend the tests before
-changing the rules. The hook is a guard against accidents, not a
-sandbox: a determined `python -c "open(...).write(...)"` gets past it,
-and the state CLI's `verify` verb is what catches the damage.
+and explaining why on stderr) in three cases. First, an Edit, Write,
+MultiEdit, or NotebookEdit targets a `state.json` under a `migrations`
+directory; the path is judged as written, with 8.3 short names expanded
+and after `normpath` and `realpath`, so trailing spaces or dots, a
+`::$DATA` stream suffix, `MIGRAT~1`, symlinks, and junctions do not
+evade it. Second, a Bash or PowerShell command mentions `state.json`
+(after backslash, quote, brace-expansion, and 8.3 normalization) and is
+not a pure read: every segment must start with an allowlisted reader
+(`cat`, `head`, `tail`, `grep`, `rg`, `jq`, `wc`, `ls`, `diff`,
+`Get-Content`, `Select-String`, `Test-Path`, `git status|diff|log|show`,
+or the state CLI), every pipe stage must be an allowlisted filter, the
+only redirects allowed are stream duplication and null devices, and
+command substitution, process substitution, `::` static calls,
+`Invoke-Expression`, and `Start-Process` are refused. `sed -n`,
+`python -c`, and `perl -ne` reads are refused too: the allowlist is
+narrow on purpose. Third, without any mention of `state.json`, a
+command whose words include a deleter, mover, copier, or writer (`rm`,
+`rmdir`, `del`, `mv`, `cp`, `xcopy`, `robocopy`, `rsync`, `install`,
+`unlink`, `shred`, `ln`, `dd`, `tee`, `sponge`, `curl`, `wget`, `find
+-delete`, `awk -i inplace`, the `*-Item` and `*-Content` cmdlets and
+their aliases, `Out-File`, `Export-*`, `[IO.File]::`) together with a
+`migrations` path segment or a bare glob that could match `state.json`.
+`rm -rf sandbox/release` and a glob under a literal non-migrations
+directory pass, and a single unpiped `python .../dbdrift.py <verb>` call
+is exempt so a `--reason` text may name a path. A shell heredoc whose
+prose mentions `state.json` is refused; write such a report with the
+Write tool. Bad or unexpected input allows the call (exit 0) so the hook
+can never wedge a session. `decide(payload)` is pure and tested in
+`tests/test_hooks.py`; extend the tests before changing the rules. The
+hook is a guard against accidents, not a sandbox: it does not see a
+symlink written through a name that never mentions `migrations` or
+`state.json`, a directory removed above the workspace (`rm -rf
+sandbox/x`), a file name built at runtime, or a shell variable set in an
+earlier call, and the state CLI's `verify` verb is what catches the
+damage.

@@ -39,7 +39,9 @@ read it before step 1.
    mode. Every check goes into the check table. A non-zero exit is a
    failure whatever the file says.
 2. Run the probe command. Read artifacts/security-probes.json: mode,
-   ran, pass, skipped, probes[] with kind, principal, source_role,
+   ran, pass, skipped, source_compared (false means the counts were
+   never compared with the source, which is not a pass in live mode),
+   probes[] with kind, principal, source_role,
    dataset, table, columns, expected {status, row_count, note}, actual
    {status, row_count, reason}, pass. Every probe goes into the probe
    table. actual.status unevaluable is UNEVALUABLE and never counts as
@@ -85,6 +87,11 @@ read it before step 1.
       principals, or admin_principal, or public_principal. Every role
       in security.json absent from principals that holds any privilege
       must have an unmapped_role or superuser_unmapped finding.
+   d. A binding the plan does not name. Every table_binding_extra,
+      dataset_access_extra, authorized_view_extra, and
+      project_binding_extra check in security-verify.json is a gap;
+      a dataset_owner_identity check (live mode) is reported, not a
+      gap, when its member is the identity that ran the migration.
    Add attempts when the plan invites them: allUsers or
    allAuthenticatedUsers anywhere in the plan or the read-back; an
    authorized view without a passing authorized_view check; a

@@ -179,7 +179,7 @@ The mapping is one pure function, `plan_security` in
 
 | PostgreSQL | BigQuery |
 |---|---|
-| Role | One principal from `security/principal-map.yaml` (`user:`, `group:`, or `serviceAccount:`). An unmapped role gets a WARNING and nothing else |
+| Role | One principal from `security/principal-map.yaml` (`user:`, `group:`, or `serviceAccount:` recommended; `domain:` and `specialGroup:` accepted). An unmapped role gets a WARNING and nothing else |
 | Role membership with INHERIT | Flattened: the member's principal receives the union of its own and its groups' privileges. NOINHERIT is flagged, not flattened |
 | `PUBLIC` grants | Folded into every role; bound directly only when `public_principal` is set. Never `allUsers` or `allAuthenticatedUsers` |
 | SELECT on a table, view, or matview | `roles/bigquery.dataViewer` on the relation; promoted to the dataset when the role holds it on every relation there (`binding_granularity: auto`) |
@@ -284,6 +284,15 @@ branches on which cloud it is talking to.
 - **MySQL execution.** `init` accepts `engine: mysql`; every execution
   script is PostgreSQL-only.
 - **Fully autonomous cutover.** Gate 2 always requires a human.
+- **Content-level validation of BYTES.** Fingerprints cover BYTES columns
+  by null count and byte length, not content; every other type gets
+  sums, minimums, and maximums.
+- **Workforce-pool principals.** `principal://` and `principalSet://`
+  members are refused; the planner accepts `user:`, `group:`,
+  `serviceAccount:`, `domain:`, `specialGroup:`, and `deleted:`.
+- **Live read of row-policy members.** Live verify reads them through
+  `rowAccessPolicies.getIamPolicy` because `bq ls` does not return
+  grantees; like every live call it is not live-tested.
 
 ## Development
 
@@ -291,6 +300,7 @@ branches on which cloud it is talking to.
 db-drift/
 ├── .claude-plugin/plugin.json      plugin manifest (0.2.0)
 ├── .claude/settings.json           permission allowlist and the state-guard PreToolUse hook
+├── hooks/hooks.json                the same hook, shipped with the plugin for installs elsewhere
 ├── CLAUDE.md                       project guidance when the repo is opened in Claude Code
 ├── CONTRIBUTING.md                 dev workflow, tests, adding providers and mapping rules
 ├── commands/                       one thin router per verb; security.md routes /db-drift:security
@@ -330,7 +340,7 @@ Run the test suite:
 python -m pytest -q -p no:cacheprovider
 ```
 
-690 tests pass, all without a database: the state machine's eight phases
+1000 tests pass, all without a database: the state machine's eight phases
 and gate enforcement, the YAML-subset config loader, the security inventory
 shaping and diff, the type map, DDL generation and view ordering, the
 predicate translator's auto and review cases, the security planner

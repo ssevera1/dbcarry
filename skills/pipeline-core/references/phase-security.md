@@ -110,11 +110,13 @@ The steps are the same in emulated and live mode; live is NOT
 LIVE-TESTED, and in emulated mode every table header in the report
 ends with "(emulated)".
 
-1. Precondition: no row access policy in security-plan.json has
+1. Preconditions: no row access policy in security-plan.json has
    confidence `review` (the policies section of
-   artifacts/translation-review.json is empty). Otherwise apply refuses
-   and names them; the only way through is /db-drift:plan, the
-   sql-translator, and Gate 1.
+   artifacts/translation-review.json is empty), and no finding has code
+   rls_deny_all_unassigned (an RLS table that would get no policy and
+   stand open). Otherwise apply refuses and names them; the only way
+   through is /db-drift:plan (a resolution through the sql-translator,
+   or bigquery.admin_principal set, or the roles mapped) and Gate 1.
 2. `python "$SCRIPTS" bq-security apply --migration <name>`. In this
    order: the taxonomy dbdrift_<migration> activated for
    FINE_GRAINED_ACCESS_CONTROL and its policy tags (only when
@@ -139,8 +141,11 @@ ends with "(emulated)".
    (taxonomy_enforcement), every tag with every reader, every tagged
    column, every row policy with the same members and a
    whitespace-normalized equal filter, and extras the plan does not
-   name (tag_reader_extra, row_policy_extra fail with expected
-   "absent"). Writes artifacts/security-verify.json (checks[] with
+   name (tag_reader_extra, row_policy_extra, table_binding_extra,
+   dataset_access_extra, authorized_view_extra, and project_binding_extra
+   for an everyone-principal fail with expected "absent"; in live mode
+   the dataset creator's dataOwner entry passes as
+   dataset_owner_identity). Writes artifacts/security-verify.json (checks[] with
    name, expected, actual, pass; enforcement_active; pass; mode) and
    prints SECURITY VERIFY PASSED or FAILED; exit 1 on any miss. pass is
    true only when every check passed and, when tags were planned,

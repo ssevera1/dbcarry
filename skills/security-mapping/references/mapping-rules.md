@@ -23,7 +23,7 @@ present. Output: `security-plan.json` and `security-plan.md`.
 | Several roles on one principal | | the principal holds the union; the strongest data role per (scope, resource, member) wins and a dataset-level role absorbs the member's table bindings inside that dataset | NOTE `principal_shared`, listing the absorbed bindings |
 | Membership flattening | `GRANT g TO r` where the membership inherits (PostgreSQL 16 and later: the membership's own `inherit_option`; earlier: `r`'s INHERIT attribute; unknown server version: both must allow) | `r` receives `g`'s grants and applicable policies, transitively | none |
 | Membership without inheritance | NOINHERIT role, or `GRANT ... WITH INHERIT FALSE` | not flattened; `r` gets only its own grants | WARNING `noinherit_not_flattened` |
-| PUBLIC grants | any grant to PUBLIC | folded into every role's effective set; when `public_principal` is set, also bound directly to it | NOTE `public_mapped` when set; WARNING `public_unmapped` when empty and PUBLIC holds relation or column grants; NOTE `public_schema_usage` when PUBLIC holds only schema USAGE |
+| PUBLIC grants | any grant to PUBLIC | folded into every role's effective set; when `public_principal` is set, also bound directly to it, and PUBLIC then counts as a column reader of its own, so a column-level PUBLIC grant leaves the other columns tagged and the public principal outside their readers | NOTE `public_mapped` when set; WARNING `public_unmapped` when empty and PUBLIC holds relation or column grants; NOTE `public_schema_usage` when PUBLIC holds only schema USAGE |
 | Superuser, mapped | `rolsuper` role with a principal | `roles/bigquery.dataOwner` on every dataset, fine-grained reader on every policy tag, `rls_bypass_<role>` with TRUE on every RLS table | WARNING `superuser_mapped` |
 | Superuser, unmapped | | nothing; the migration identity owns the datasets | INFO `superuser_unmapped` |
 | Ownership | relation owners | not mapped | NOTE `ownership_not_mapped` (once, subject `owners`) |
@@ -106,7 +106,8 @@ tag `customers__email`, readers `app_rw` only.
 | Identity predicates | `current_user`, `session_user`, `current_role` become `SESSION_USER()`; the policy carries the translator's note and the plan's `identity_notes` | INFO `identity_predicate` |
 | Review-flagged predicate carried by an emitted policy | blocks apply until resolved | WARNING `translation_review` |
 | Review-flagged predicate reaching only unmapped roles | no policy carries it; nothing blocks | INFO `translation_review_unmapped` |
-| Resolution present in `translation-resolutions.json` under `policies["schema.table/policy"]` | replaces that source policy's translated text; confidence `resolved`; the rationale is appended to the policy's notes | NOTE `translation_resolved` |
+| Resolution present in `translation-resolutions.json` under `policies["schema.table/policy"]` | replaces that source policy's translated text only when the automatic translation was `review`; confidence `resolved`; the rationale is appended to the policy's notes. A resolution is rejected, and the policy stays `review`, when it has no rationale, when its `source_sql` (copied from the review file) no longer equals the source predicate, or when its `sql` is not one balanced expression without a semicolon | NOTE `translation_resolved`; WARNING `translation_resolution_ignored` (the predicate translated automatically), `translation_resolution_unjustified`, `translation_resolution_stale`, `translation_resolution_malformed` |
+| PUBLIC reads an RLS table and `public_principal` is set | no row policy is written for the public principal (policies are per source role), so it sees no rows | INFO `public_rls_denied` |
 | Security-barrier views | not translated | WARNING `security_barrier_view` |
 
 The demo yields, on `orders`: `rls_reporting` with `(region = 'eu')`
@@ -153,8 +154,8 @@ commented out), `60-masking-requests.json` (masking mode only),
 ## Finding codes
 
 Every code `bq_security.py` can emit, with severity and subject shape.
-Only `translation_review` blocks apply; the rest inform Gate 1 and the
-reports. The plan phase presents every WARNING.
+`translation_review` and `rls_deny_all_unassigned` block apply; the rest
+inform Gate 1 and the reports. The plan phase presents every WARNING.
 
 | Code | Severity | Subject | Meaning |
 |---|---|---|---|
@@ -168,7 +169,12 @@ reports. The plan phase presents every WARNING.
 | `public_unmapped` | WARNING | `PUBLIC` | PUBLIC holds relation or column grants and `public_principal` is empty; only inventoried roles keep access |
 | `policy_command_unmapped` | WARNING | `schema.table/policy` | an INSERT, UPDATE, or DELETE policy, or a WITH CHECK clause, has no BigQuery form |
 | `rls_deny_all` | WARNING | `schema.table` | no mapped role gets a read policy on this RLS table; `rls_deny_all` (FALSE) for `admin_principal` keeps it closed |
-| `rls_deny_all_unassigned` | WARNING | `schema.table` | same situation with `admin_principal` empty: nothing can be written and the table would be open to every reader |
+| `rls_deny_all_unassigned` | WARNING | `schema.table` | same situation with `admin_principal` empty: nothing can be written and the table would be open to every reader; apply refuses the plan, and the probes expect zero rows for every mapped reader |
+| `column_grant_unknown_column` | WARNING | `schema.table/role` | a column-level SELECT names a column the inventory does not list; no binding is derived from it |
+| `translation_resolution_ignored` | WARNING | `schema.table/policy` | a resolution exists for a predicate that translated automatically; it is ignored |
+| `translation_resolution_unjustified` | WARNING | `schema.table/policy` | the resolution has no rationale; the policy stays at review |
+| `translation_resolution_stale` | WARNING | `schema.table/policy` | the resolution's `source_sql` differs from the current source predicate; the policy stays at review |
+| `translation_resolution_malformed` | WARNING | `schema.table/policy` | the resolution is not one balanced expression, or carries a semicolon; the policy stays at review |
 | `noinherit_not_flattened` | WARNING | `role` | a membership without inheritance was not flattened |
 | `unmapped_role` | WARNING | `role` | a role with privileges has no principal; the message lists what it would have received |
 | `security_barrier_view` | WARNING | `schema.view` | a security_barrier view's logic is not translated |
@@ -180,6 +186,7 @@ reports. The plan phase presents every WARNING.
 | `privilege_unmapped` | INFO | `role` | REFERENCES, TRIGGER, or MAINTAIN; no equivalent |
 | `superuser_unmapped` | INFO | `role` | a superuser with no principal; the migration identity owns the datasets |
 | `identity_predicate` | INFO | `schema.table/policy` | the predicate compares a column with the caller's identity; role name on PostgreSQL, email on BigQuery |
+| `public_rls_denied` | INFO | `schema.table` | PUBLIC reads an RLS table and a public principal is set; it receives no row policy and sees no rows |
 | `rls_denies_role` | INFO | `schema.table/role` | the role reads the table but no permissive policy names it; no rows on either side |
 | `view_rls_semantics` | INFO | `schema.view` | the view reads an RLS table; owner evaluation on PostgreSQL, querying principal on BigQuery |
 | `view_column_semantics` | INFO | `schema.view` | the view reads restricted columns; tags apply to the querying principal even through an authorized view |
@@ -192,5 +199,5 @@ reports. The plan phase presents every WARNING.
 | `default_privileges_note` | NOTE | `schema or */grantee` | default privileges exist on the source; no binding is written, and the note says whether a dataset-level binding already covers future tables |
 | `ownership_not_mapped` | NOTE | `owners` | relation ownership is not mapped |
 
-Sixteen WARNING, ten INFO, seven NOTE: 33 codes. `SEVERITY_RANK`
+Twenty-one WARNING, eleven INFO, seven NOTE: 39 codes. `SEVERITY_RANK`
 orders them WARNING, INFO, NOTE in the plan and the report.

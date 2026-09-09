@@ -79,7 +79,8 @@ says "(emulated)". Live mode is NOT LIVE-TESTED.
    the principal (emulated: the model; live: impersonating the role's
    probe_service_account, and a role without one gets no probes), and
    writes artifacts/security-probes.json. An empty probe set or an
-   unevaluable probe never passes. The agent writes
+   unevaluable probe never passes, and neither does a run with
+   source_compared false (--no-source) in live mode. The agent writes
    artifacts/06b-security-validation.md with the verdict line
    SECURITY VALIDATION PASSED or SECURITY VALIDATION FAILED.
 4. Read both reports. VALIDATION PASSED and SECURITY VALIDATION PASSED

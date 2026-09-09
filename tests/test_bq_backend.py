@@ -1,5 +1,7 @@
+import decimal
 import gzip
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -586,7 +588,6 @@ def test_check_member_rejects_everyone_and_bad_spellings(tmp_path, member):
     "specialGroup:projectOwners", "specialGroup:projectReaders",
     "specialGroup:projectWriters", "domain:example.com",
     "serviceAccount:sa@p.iam.gserviceaccount.com", "user:a.b+c@x.io",
-    "principal://iam.googleapis.com/locations/global/workforcePools/p/subject/s",
     "deleted:user:a@x?uid=1",
 ])
 def test_check_member_accepts_iam_grammar(member):
@@ -729,8 +730,17 @@ def test_probe_reports_unevaluable_for_typed_and_unicode_predicates(tmp_path,
     res = emu.probe(RO, "", "retail", "orders", ["id"])
     assert res["status"] == "unevaluable" and res["row_count"] is None
     assert "INT64" in res["reason"]
-    emu.create_row_policy("retail", "orders", "rls_id", [RO], "région = 'eu'")
-    res = emu.probe(RO, "", "retail", "orders", ["id"])
+    # a filter the tokenizer refuses never gets created; one planted in
+    # the state file is reported as unevaluable, never as a count
+    with pytest.raises(bb.BackendError, match="unsupported character"):
+        emu.create_row_policy("retail", "orders", "rls_id", [RO],
+                              "région = 'eu'")
+    state = read_state(tmp_path / "emu")
+    state["datasets"]["retail"]["tables"]["orders"]["row_policies"][
+        "rls_id"]["filter"] = "région = 'eu'"
+    write_state(tmp_path / "emu", state)
+    res = bb.EmulatedBackend(tmp_path / "emu", PROJECT, "US").probe(
+        RO, "", "retail", "orders", ["id"])
     assert res["status"] == "unevaluable" and res["row_count"] is None
     assert "unsupported character" in res["reason"]
 
@@ -1176,7 +1186,11 @@ def test_live_row_policies(tmp_path):
         "rowAccessPolicyReference": {"policyId": "rls_reporting"},
         "filterPredicate": "region = 'eu'",
         "grantees": [REPORTING]}])
-    backend, runner = live(tmp_path, [(0, "", ""), (0, listing, "")])
+    iam = json.dumps({"bindings": [{"role": "roles/bigquery.filteredDataViewer",
+                                    "members": [REPORTING, RW]}]})
+    backend, runner = live(tmp_path, [(0, "", ""), (0, listing, ""),
+                                      (0, "tok\n", "")],
+                           http_outputs=[(200, iam, "")])
     backend.create_row_policy("retail", "orders", "rls_reporting",
                               [REPORTING, RW], "region = 'eu'")
     assert runner.calls[0] == (QUERY, (
@@ -1184,17 +1198,22 @@ def test_live_row_policies(tmp_path):
         "`proj.retail.orders` GRANT TO (\"group:retail-reporting@example.com\", "
         "\"group:retail-app-rw@example.com\") FILTER USING (region = 'eu')"))
     assert backend.list_row_policies("retail", "orders") == [
-        {"name": "rls_reporting", "members": [REPORTING],
-         "filter": "region = 'eu'"}]
+        {"name": "rls_reporting", "members": [REPORTING, RW],
+         "filter": "region = 'eu'", "members_source": "iam"}]
     assert runner.calls[1] == (
         LS + ["--row_access_policies", "proj:retail.orders"], None)
+    assert runner.calls[2] == (TOKEN_ARGV, None)
     with pytest.raises(bb.BackendError, match="policy name"):
         backend.create_row_policy("retail", "orders", "bad name", [RW], "TRUE")
     # a grantee that could break out of its quotes never reaches bq
     for bad in ["group:a@x\\", 'group:a"@x']:
         with pytest.raises(bb.BackendError):
             backend.create_row_policy("retail", "orders", "p", [bad], "TRUE")
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
+    # an empty listing makes no IAM call and mints no token
+    runner.outputs.append((0, "[]", ""))
+    assert backend.list_row_policies("retail", "orders") == []
+    assert len(runner.calls) == 4 and len(backend.http.calls) == 1
 
 
 def test_live_load_and_count(tmp_path):
@@ -1507,3 +1526,331 @@ def test_cli_options_after_verb_and_bad_migration_names(tmp_path, monkeypatch,
     capsys.readouterr()
     assert (home / "pg" / "pgsql" / "bin" / "psql.exe").exists()
     assert (home / "bq-emulated" / "other" / "keep.txt").exists()
+
+
+# ------------------------------------------------- review findings, v0.2.0
+
+INJECTION = "TRUE); DROP TABLE `proj.retail.orders`; SELECT (TRUE"
+LEGIT_FILTER = "region = 'a;b)' OR (status IN ('x)', 'y;'))"
+
+
+@pytest.mark.parametrize("filter_sql", [
+    INJECTION,
+    "TRUE)",                       # closes the FILTER USING group early
+    "(TRUE",                       # never closes
+    "TRUE) OR (TRUE",              # balanced count, closes early
+    "TRUE;",                       # trailing statement separator
+    "TRUE; -- comment",
+    "TRUE -- swallows the closing parenthesis",
+    "TRUE /* open comment",
+    "region = 'open",
+    "",
+    "   ",
+    "-- only a comment",
+])
+def test_check_filter_sql_rejects_injection_and_broken_filters(filter_sql):
+    with pytest.raises(bb.SqlSyntaxError):
+        bb.check_filter_sql(filter_sql)
+
+
+@pytest.mark.parametrize("filter_sql", [
+    LEGIT_FILTER,
+    "TRUE",
+    "region = 'eu' /* a; b) */ AND status <> 'x'",
+    "region = '''multi; line)'''",
+    r"region = r'\;)'",
+    "actor = SESSION_USER()",
+])
+def test_check_filter_sql_accepts_legitimate_filters(filter_sql):
+    assert bb.check_filter_sql(filter_sql) is None
+
+
+def test_row_policy_filter_injection_never_reaches_either_backend(tmp_path,
+                                                                  emu):
+    emu.create_dataset("retail")
+    emu.run_ddl(ORDERS_DDL)
+    for bad in [INJECTION, "TRUE)", "TRUE;"]:
+        with pytest.raises(bb.BackendError, match="rls_bad"):
+            emu.create_row_policy("retail", "orders", "rls_bad", [RO], bad)
+    assert emu.list_row_policies("retail", "orders") == []
+    emu.create_row_policy("retail", "orders", "rls_ok", [RO], LEGIT_FILTER)
+    assert emu.list_row_policies("retail", "orders")[0]["filter"] == \
+        LEGIT_FILTER
+    backend, runner = live(tmp_path)
+    for bad in [INJECTION, "TRUE)", "TRUE;"]:
+        with pytest.raises(bb.BackendError, match="rls_bad"):
+            backend.create_row_policy("retail", "orders", "rls_bad", [RO], bad)
+    assert runner.calls == []
+    backend.create_row_policy("retail", "orders", "rls_ok", [RO], LEGIT_FILTER)
+    assert runner.calls[0][1].endswith(f"FILTER USING ({LEGIT_FILTER})")
+
+
+def test_emulated_load_keeps_numeric_and_bignumeric_digits(tmp_path, emu):
+    emu.create_dataset("retail")
+    emu.run_ddl("CREATE TABLE `proj.retail.ledger` (id INT64 NOT NULL, "
+                "amount NUMERIC, big BIGNUMERIC)")
+    fields = emu.get_table_schema("retail", "ledger")
+    big = "1234567890123456789012345678901234567.123456789012345678901234567"
+    line = ('{"id": 1, "amount": 12345678901234567.89, "big": ' + big + "}")
+    path = tmp_path / "ledger.ndjson"
+    path.write_text(line + "\n" + '{"id": 2, "amount": 0.11, "big": 0.5}\n',
+                    encoding="utf-8")
+    assert emu.load_ndjson("retail", "ledger", path, fields) == 2
+    assert emu.count_rows("retail", "ledger") == 2
+    with gzip.open(emu._data_path("retail", "ledger"), "rt",
+                   encoding="utf-8") as fh:
+        stored = fh.read()
+    assert stored.splitlines()[0] == line
+    rows = emu._read_rows("retail", "ledger")
+    assert rows[0]["amount"] == decimal.Decimal("12345678901234567.89")
+    assert rows[0]["big"] == decimal.Decimal(big)
+    spec = [{"column": "amount", "class": "number", "bq_type": "NUMERIC"},
+            {"column": "big", "class": "number", "bq_type": "BIGNUMERIC"}]
+    raw = emu.query_fingerprint("retail", "ledger", spec)
+    assert raw["amount__sum"] == "12345678901234568"
+    assert raw["big__sum"] == \
+        "1234567890123456789012345678901234567.623456789012345678901234567"
+    assert raw["amount__max"] == "12345678901234567.89"
+    # a JSON parse error still names the file, and nothing is written
+    bad = tmp_path / "bad.ndjson"
+    bad.write_text('{"id": 3, "amount": 1.0}\n{nope\n', encoding="utf-8")
+    with pytest.raises(bb.BackendError, match="bad NDJSON"):
+        emu.load_ndjson("retail", "ledger", bad, fields)
+    assert emu.count_rows("retail", "ledger") == 2
+
+
+def test_live_list_row_policies_reads_members_through_iam(tmp_path):
+    """NOT LIVE-TESTED: bq ls --row_access_policies is mocked. The
+    grantees field is input only on the REST resource, so members come
+    from rowAccessPolicies.getIamPolicy and the listing is a fallback."""
+    listing = json.dumps([
+        {"rowAccessPolicyReference": {"policyId": "rls_reporting"},
+         "filterPredicate": "region = 'eu'"},
+        {"rowAccessPolicyReference": {"policyId": "rls_app"},
+         "filterPredicate": "TRUE", "grantees": [RW]}])
+    iam_ok = json.dumps({"bindings": [
+        {"role": "roles/bigquery.filteredDataViewer",
+         "members": [REPORTING, RO]},
+        {"role": "roles/bigquery.dataViewer", "members": [OUTSIDER]}]})
+    backend, runner = live(tmp_path, [
+        (0, listing, ""),
+        (0, "tok-secret-value\n", "")],
+        http_outputs=[
+            (200, iam_ok, ""),
+            (403, json.dumps({"error": {"message":
+                                        "denied tok-secret-value"}}), "")])
+    policies = backend.list_row_policies("retail", "orders")
+    assert policies == [
+        {"name": "rls_reporting", "members": [REPORTING, RO],
+         "filter": "region = 'eu'", "members_source": "iam"},
+        {"name": "rls_app", "members": [RW], "filter": "TRUE",
+         "members_source": "list"}]
+    assert runner.calls[0] == (
+        LS + ["--row_access_policies", "proj:retail.orders"], None)
+    # one token for the whole listing, one getIamPolicy call per policy
+    assert runner.calls[1] == (TOKEN_ARGV, None)
+    assert len(runner.calls) == 2
+    base = ("https://bigquery.googleapis.com/bigquery/v2/projects/proj/"
+            "datasets/retail/tables/orders/rowAccessPolicies/")
+    assert backend.http.calls[0] == (
+        "POST", base + "rls_reporting:getIamPolicy",
+        {"Authorization": "Bearer tok-secret-value",
+         "Content-Type": "application/json; charset=utf-8",
+         "Accept": "application/json"}, {})
+    assert backend.http.calls[1][:2] == ("POST", base + "rls_app:getIamPolicy")
+    ops = read_log(tmp_path / "ops.log")
+    assert [o["op"] for o in ops] == ["request_failed"]
+    assert ops[0]["status"] == 403 and "getIamPolicy" in ops[0]["url"]
+    text = (tmp_path / "ops.log").read_text(encoding="utf-8")
+    assert "tok-secret-value" not in text and "<redacted>" in text
+    # no token at all: every policy falls back to the listing
+    runner.outputs += [(0, listing, ""), (1, "", "not logged in")]
+    policies = backend.list_row_policies("retail", "orders")
+    assert [p["members_source"] for p in policies] == ["list", "list"]
+    assert policies[0]["members"] == [] and policies[1]["members"] == [RW]
+    assert len(backend.http.calls) == 2
+
+
+def test_emulator_is_bound_to_the_workspace_that_created_it(tmp_path,
+                                                            monkeypatch):
+    monkeypatch.setattr(pg, "TOOLS_ROOT", tmp_path / "home")
+    cfg = {"mode": "emulated", "project": "proj", "location": "US"}
+    ws_a = tmp_path / "a" / "migrations" / "m1"
+    ws_b = tmp_path / "b" / "migrations" / "m1"
+    for ws in (ws_a, ws_b):
+        ws.mkdir(parents=True)
+        (ws / "migration.yaml").write_text(
+            MIGRATION_YAML.replace("demo-project", "proj"), encoding="utf-8")
+    backend_a = bb.make_backend(cfg, "m1", ws_a)
+    backend_a.create_dataset("retail")
+    root = bb.emulated_root("m1")
+    assert read_state(root)["workspace"] == str(ws_a.resolve())
+    with pytest.raises(bb.BackendError) as ei:
+        bb.make_backend(cfg, "m1", ws_b)
+    text = str(ei.value)
+    assert str(ws_a.resolve()) in text and str(ws_b.resolve()) in text
+    assert "different migration name" in text
+    # the same workspace, spelled through a relative path, still opens
+    monkeypatch.chdir(tmp_path)
+    rel = Path("a") / "migrations" / "m1"
+    assert bb.make_backend(cfg, "m1", rel).list_datasets() == ["retail"]
+    # reset from the other workspace is refused and deletes nothing
+    argv_b = ["bq-backend", "--root", str(tmp_path / "b"), "--migration",
+              "m1", "reset", "--yes"]
+    assert bb.main(argv_b) == 1
+    assert root.exists() and read_state(root)["datasets"] == {"retail": {
+        "access": [], "tables": {}}}
+    argv_a = ["bq-backend", "--root", str(tmp_path / "a"), "--migration",
+              "m1", "reset", "--yes"]
+    assert bb.main(argv_a) == 0
+    assert not root.exists()
+    # a state file that predates the key is adopted by whoever opens it
+    backend_b = bb.make_backend(cfg, "m1", ws_b)
+    backend_b.create_dataset("retail")
+    state = read_state(root)
+    del state["workspace"]
+    write_state(root, state)
+    assert bb.make_backend(cfg, "m1", ws_a).list_datasets() == ["retail"]
+    assert read_state(root)["workspace"] == str(ws_a.resolve())
+    with pytest.raises(bb.BackendError, match="different migration name"):
+        bb.make_backend(cfg, "m1", ws_b)
+    # the project and location checks still apply
+    with pytest.raises(bb.BackendError, match="project 'proj'"):
+        bb.make_backend(dict(cfg, project="other"), "m1", ws_a)
+    # a backend opened without a workspace (tests, tooling) is unchecked
+    assert bb.EmulatedBackend(root, "proj", "US").list_datasets() == ["retail"]
+
+
+@pytest.mark.parametrize("literal,expected", [
+    (r"'\u00e9'", "\u00e9"),
+    (r"'\U0001F600'", "\U0001F600"),
+    (r"'\x41\X42'", "AB"),
+    (r"'\101\102'", "AB"),
+    (r"'\000'", "\0"),
+    (r"'a\nb\tc\\d\'e\"f\`g\?h'", "a\nb\tc\\d'e\"f`g?h"),
+    (r"'\a\b\f\r\v'", "\a\b\f\r\v"),
+])
+def test_string_escapes_are_decoded(literal, expected):
+    toks = bb.tokenize_sql(literal)
+    assert [(t.kind, t.text) for t in toks] == [("string", expected)]
+
+
+@pytest.mark.parametrize("literal", [
+    r"'\q'", r"'\u00'", r"'\U0001F60'", r"'\xZ1'", r"'\12'", r"'\8'",
+    r"'\0'", r"'\uD83D'", r"'\U00110000'", r"'\'",
+])
+def test_invalid_string_escapes_are_syntax_errors(literal):
+    with pytest.raises(bb.SqlSyntaxError):
+        bb.tokenize_sql(literal)
+    with pytest.raises(bb.Unevaluable):
+        bb.evaluate_predicate(f"region = {literal}", ORDER_ROWS,
+                              ORDER_FIELDS, "a")
+
+
+def test_predicate_evaluator_matches_decoded_escapes():
+    rows = [{"region": "\u00e9"}, {"region": "u00e9"}, {"region": "A"}]
+    fields = [{"name": "region", "type": "STRING"}]
+    assert bb.evaluate_predicate(r"region = '\u00e9'", rows, fields, "a") == 1
+    assert bb.evaluate_predicate(r"region = '\x41'", rows, fields, "a") == 1
+    assert bb.evaluate_predicate(r"region = '\101'", rows, fields, "a") == 1
+    assert bb.evaluate_predicate(r"region = r'\u00e9'", rows, fields, "a") \
+        == 0
+
+
+@pytest.mark.parametrize("member", [
+    "group:a&b@x", "group:a|b@x", "group:a^b@x", "group:a%b@x",
+    "group:a<b@x", "group:a>b@x", "group:a(b@x", "group:a)b@x",
+    "group:a$b@x", "group:a;b@x", "group:a\u200bb@x", "group:a\u00e9@x",
+    "group:a,b@x", "group:a#b@x", "group:a!b@x", "group:a*b@x",
+    "principal://iam.googleapis.com/locations/global/workforcePools/p/subject/s",
+    "principalSet://iam.googleapis.com/x", "iamMember:group:x@y",
+    "User:a@x", "GROUP:a@x", "serviceaccount:sa@p.iam.gserviceaccount.com",
+    "Deleted:user:x@y?uid=1", "group:", "group:%PATH%",
+])
+def test_check_member_rejects_shell_metacharacters_and_unknown_kinds(
+        tmp_path, member):
+    with pytest.raises(bb.BackendError):
+        bb._check_member(member)
+    backend, runner = live(tmp_path)
+    with pytest.raises(bb.BackendError):
+        backend.add_table_binding("retail", "orders", bb.ROLE_VIEWER, member)
+    with pytest.raises(bb.BackendError):
+        backend.add_policy_tag_binding(
+            "projects/proj/locations/us/taxonomies/1/policyTags/2",
+            bb.ROLE_FGR, member)
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("member", [
+    "group:x@example.com", "user:a.b+c@x.org",
+    "serviceAccount:sa@p.iam.gserviceaccount.com",
+    "deleted:user:x@y?uid=123",
+    "deleted:serviceAccount:sa@p.iam.gserviceaccount.com?uid=1",
+    "domain:example.com", "specialGroup:projectOwners",
+    "group:team-name_1@sub.example.com", "user:x=y@example.com",
+    "user:a/b@example.com",
+])
+def test_check_member_accepts_plain_principals(member):
+    bb._check_member(member)
+
+
+def test_emulator_state_and_data_writes_are_atomic(tmp_path, emu, monkeypatch):
+    emu.create_dataset("retail")
+    emu.run_ddl(CUSTOMERS_DDL)
+    root = tmp_path / "emu"
+    before = read_state(root)
+    fields = emu.get_table_schema("retail", "customers")
+    good = write_ndjson(tmp_path / "c.ndjson", [
+        {"id": 1, "full_name": "A", "email": "a@x"}], gz=False)
+    emu.load_ndjson("retail", "customers", good, fields)
+    # every write lands through os.replace, never an in-place rewrite
+    replaced = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        replaced.append((Path(src).name, Path(dst).name))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(bb.os, "replace", spy)
+    emu.add_table_binding("retail", "customers", bb.ROLE_VIEWER, RO)
+    emu.load_ndjson("retail", "customers", good, fields)
+    names = {dst for _src, dst in replaced}
+    assert names == {STATE_FILE, "customers.ndjson.gz"}
+    assert all(src != dst for src, dst in replaced)
+    assert emu.count_rows("retail", "customers") == 2
+
+    def fail(_src, _dst):
+        raise OSError("disk")
+
+    # a failed write leaves the previous state file intact
+    monkeypatch.setattr(bb.os, "replace", fail)
+    with pytest.raises(OSError):
+        emu.add_table_binding("retail", "customers", bb.ROLE_VIEWER, RW)
+    assert read_state(root)["datasets"]["retail"]["tables"]["customers"][
+        "bindings"] == [{"role": bb.ROLE_VIEWER, "member": RO}]
+    assert before["datasets"]["retail"]["tables"]["customers"]["bindings"] == []
+
+
+def test_probe_explains_session_user_against_a_group(tmp_path, emu):
+    emu.create_dataset("retail")
+    emu.run_ddl(ORDERS_DDL)
+    emu.add_table_binding("retail", "orders", bb.ROLE_VIEWER, RO)
+    emu.add_table_binding("retail", "orders", bb.ROLE_VIEWER, OUTSIDER)
+    rows = [dict(r, actor="nobody@example.com") for r in ORDER_ROWS]
+    emu.load_ndjson("retail", "orders",
+                    write_ndjson(tmp_path / "o.ndjson.gz", rows),
+                    emu.get_table_schema("retail", "orders"))
+    emu.create_row_policy("retail", "orders", "rls_self", [RO, OUTSIDER],
+                          "actor = SESSION_USER()")
+    sentence = ("emulated: SESSION_USER() compared with the group address; "
+                "BigQuery evaluates it per member")
+    res = emu.probe(RO, "", "retail", "orders", ["id"])
+    assert res["status"] == "ok" and res["row_count"] == 0
+    assert sentence in res["reason"]
+    res = emu.probe(OUTSIDER, "", "retail", "orders", ["id"])
+    assert res["status"] == "ok" and res["row_count"] == 3
+    assert sentence not in res["reason"]
+    emu.create_row_policy("retail", "orders", "rls_self", [RO],
+                          "region = 'eu'")
+    assert sentence not in emu.probe(RO, "", "retail", "orders", ["id"])[
+        "reason"]

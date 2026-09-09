@@ -57,7 +57,9 @@ LIVE-TESTED; label emulated counts as emulated.
    - the ops summary from schema-applied.json;
    - every finding from schema-plan.json verbatim, grouped by
      severity. WARNING codes: type_warning, matview_as_view,
-     primary_key_dropped, foreign_key_dropped, view_review. INFO
+     primary_key_dropped, foreign_key_dropped, view_review,
+     view_resolution_ignored, view_resolution_unjustified,
+     view_resolution_stale. INFO
      codes: index_dropped, constraints_dropped, no_primary_key. NOTE
      codes: sequence_dropped, identifier_renamed, default_dropped,
      and the rest;

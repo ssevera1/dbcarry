@@ -55,10 +55,19 @@ Output, exactly this shape, keys copied from the review file unchanged:
 
   {"views": {"<schema>.<name>": {
        "sql": <one SELECT or WITH statement, or null>,
-       "rationale": <one line>}},
+       "rationale": <one line>,
+       "source_sql": <the item's source_sql, copied unchanged>}},
    "policies": {"<schema>.<table>/<policy>": {
        "sql": <boolean expression, or null>,
-       "rationale": <one line>}}}
+       "rationale": <one line>,
+       "source_sql": <the item's source_sql, copied unchanged>}}}
+
+The rationale is mandatory (a resolution without one is not applied),
+and source_sql is how the planner detects a resolution written against
+a predicate the source has since changed: copy it verbatim from the
+review item. A policy sql must be one balanced boolean expression with
+no semicolon; the planner rejects anything else, because the live
+backend hands the text to bq query, which runs scripts.
 
 What the scripts accept:
 - A view sql is one SELECT (or WITH) query body: no CREATE VIEW, no

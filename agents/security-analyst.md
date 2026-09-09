@@ -62,8 +62,9 @@ Process:
      column-level privileges: the columns granted, the columns left
      out, and whether the grantee also holds table-level SELECT (then
      the column grant adds nothing).
-   - Row-level security: one entry per rls row (enabled, forced,
-     owner), then each policy in plain language: name, command,
+   - Row-level security: one entry per rls row (enabled, forced, and
+     the owner taken from the relation's owner row in
+     relation_privileges), then each policy in plain language: name, command,
      permissive or restrictive, the roles it names, the USING
      predicate verbatim and restated in words, WITH CHECK when
      present. Say which roles with SELECT on the table no policy names

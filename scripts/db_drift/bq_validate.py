@@ -11,7 +11,10 @@ are compared:
     string    nonnull, len_sum, min, max    (STRING; min and max in binary order)
     bool      nonnull, true_count
     temporal  nonnull, min, max             (DATE, DATETIME, TIMESTAMP, as UTC ISO text)
-    other     nonnull                       (BYTES, TIME, JSON)
+    other     nonnull, len_sum              (BYTES: octet_length on PostgreSQL,
+                                             LENGTH on BigQuery, decoded base64
+                                             length in Python)
+    other     nonnull                       (TIME, JSON)
     other     nonempty                      (ARRAY<...>: BigQuery stores a NULL
                                              array as an empty array, so the
                                              non-empty count is the only one
@@ -45,13 +48,12 @@ NUMERIC sum keeps every digit.
 The emulated backend has no SQL engine; fingerprint_from_rows computes
 the same metrics over the loaded NDJSON rows in pure Python, an
 independent implementation from the PostgreSQL SQL, so an emulated run
-still proves the export is complete and faithful. One limit: the
-emulator parses its stored NDJSON numbers with json.loads, so a NUMERIC
-with more than about 15 significant digits loses precision there (real
-BigQuery keeps it), which shows up as a sum mismatch, never as a false
-pass.
+still proves the export is complete and faithful. The emulator stores
+the NDJSON lines as exported and reads their numbers as Decimal, so a
+NUMERIC or BIGNUMERIC sum keeps every digit there too.
 """
 import argparse
+import base64
 import decimal
 import json
 import math
@@ -146,7 +148,13 @@ def metrics_for(entry):
         return ["nonnull", "min", "max"]
     if _is_array(entry):
         return ["nonempty"]
+    if _is_bytes(entry):
+        return ["nonnull", "len_sum"]
     return ["nonnull"]
+
+
+def _is_bytes(entry):
+    return entry.get("bq_type") == "BYTES"
 
 
 # ------------------------------------------------------------- SQL text
@@ -235,6 +243,9 @@ def pg_fingerprint_sql(schema, table, spec):
         elif _is_array(e):
             parts.append(f"count(*) FILTER (WHERE cardinality({col}) > 0) "
                          f"AS {alias('nonempty')}")
+        elif _is_bytes(e):
+            parts += [nonnull,
+                      f"sum(octet_length({col})) AS {alias('len_sum')}"]
         else:
             parts.append(nonnull)
     return (f"SELECT row_to_json(x) FROM (SELECT {', '.join(parts)} "
@@ -333,6 +344,9 @@ def bq_fingerprint_sql(project, dataset, bq_name, spec):
         elif _is_array(e):
             parts.append(f"COUNTIF(ARRAY_LENGTH({ref}) > 0) "
                          f"AS {alias('nonempty')}")
+        elif _is_bytes(e):
+            # LENGTH over BYTES counts bytes, as octet_length does.
+            parts += [nonnull, f"SUM(LENGTH({ref})) AS {alias('len_sum')}"]
         else:
             parts.append(nonnull)
     return (f"SELECT {', '.join(parts)} FROM "
@@ -515,6 +529,12 @@ def _accumulate(acc, entry, value):
     elif _is_array(entry):
         if not isinstance(value, list) or value:
             acc["nonempty"] += 1
+    elif _is_bytes(entry):
+        # The export carries bytea as unbroken base64; the decoded
+        # length is what octet_length and BigQuery's LENGTH report.
+        acc["nonnull"] += 1
+        text = value if isinstance(value, str) else str(value)
+        acc["len_sum"] += len(base64.b64decode(text, validate=True))
     else:
         acc["nonnull"] += 1
 

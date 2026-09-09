@@ -111,10 +111,10 @@ platform's line ending (CRLF on Windows).
 | `security-plan.json` | `bq-security plan` only | The machine plan: principals, bindings, policy_tags, row_policies, authorized_views, identity_notes, nesting_notes, masking, findings, effective privileges per role, context_tables. Apply never rewrites it: the taxonomy and tag resource names land in `security-applied.json`, and verify injects them into the plan in memory for the `tag_resource` cross-check |
 | `security-plan.md` | `bq-security plan` | The same plan as tables for Gate 1 and the reports |
 | `translation-review.json` | `bq-schema translate` (`views`) and `bq-security plan` (`policies`) | Review-flagged items for the sql-translator: per item the source SQL, the partial auto translation, the notes, and the table context. Empty `policies` means nothing blocks apply |
-| `translation-resolutions.json` | the sql-translator agent | `{"views": {"schema.name": {"sql", "rationale"}}, "policies": {"schema.table/policy": {"sql", "rationale"}}}`; read by both translate and plan on the next run |
+| `translation-resolutions.json` | the sql-translator agent | `{"views": {"schema.name": {"sql", "rationale", "source_sql"}}, "policies": {"schema.table/policy": {"sql", "rationale", "source_sql"}}}`; read by both translate and plan on the next run; a resolution applies only to a review-flagged item, needs a rationale, and is rejected when its `source_sql` no longer matches the source or its `sql` is not one balanced expression |
 | `security-applied.json` | `bq-security apply` | The taxonomy resource name, tag name to resource name map, operation count, mode. Verify uses it only to cross-check tag resource names, never as proof of existence |
 | `security-verify.json` | `bq-security verify` | `checks` (name, expected, actual, pass), `enforcement_active`, `pass`, mode. Live `bq-load` refuses without `pass: true` |
-| `security-probes.json` | `bq-security probes` (`--run` executes) | The probe set with expected and, after a run, actual results and per-probe pass; `ran`, `pass`, `skipped` at the top |
+| `security-probes.json` | `bq-security probes` (`--run` executes) | The probe set with expected and, after a run, actual results and per-probe pass; `ran`, `pass`, `skipped`, `source_compared` at the top |
 | `bq-apply/30-iam.sh`, `40-policy-tags.sh`, `50-row-policies.sql`, `60-masking-requests.json` (masking mode only), `70-identity-notes.md` | `bq-security plan` | The plan rendered as commands for hand review; apply performs the same operations through the backend. 50 comments out review policies; 60 is never executed; 70 is documentation (memberships, principals, identity predicates, probe setup). `10-datasets.sh` and `20-tables.sql` come from `bq-schema translate` |
 | `bq-operations.log` | both backends | One JSON line per mutating operation and per failed command, tokens redacted; the dry record of what happened |
 | `bq-work/` (live only) | LiveBackend | Schema and access documents `bq update` reads from files |
@@ -151,7 +151,7 @@ apply. The full code list is in `references/mapping-rules.md`.
 
 `$SCRIPTS` is `${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py`. `--root` and
 `--migration` are accepted before or after the verb on every `bq-*`
-module. The `security` module takes connection flags instead
+module except `bq-validate compare`, which takes no workspace flags. The `security` module takes connection flags instead
 (`--host`, `--port`, `--dbname`, `--user`, `--password-env`), as
 `inventory` does.
 

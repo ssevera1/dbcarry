@@ -129,6 +129,7 @@ alter dashes inside code, string literals, fixtures, data, or quoted material.
 ```
 .claude-plugin/plugin.json      plugin manifest
 .claude/settings.json           permission allowlist and the PreToolUse hook
+hooks/hooks.json                the same PreToolUse hook, shipped with the plugin
 commands/                       one thin router per verb
 agents/                         six subagents (discovery, compatibility, validator, three security)
 skills/pipeline-core/           shared rules and the per-phase playbooks

@@ -167,26 +167,41 @@ def test_bash_write_forms_are_blocked(guard, command):
 @pytest.mark.parametrize("command", [
     "cat migrations/x/state.json",
     r"type migrations\x\state.json",
-    "python -c \"import json; print(json.load(open('migrations/x/state.json')))\"",
     "python scripts/dbdrift.py state --migration x verify 2>&1",
     "git diff -- migrations/x/state.json",
     "grep -n status migrations/x/state.json | head",
     "python -m pytest -q -p no:cacheprovider > out.txt",
     "rm -rf build/",
     "echo hello > notes.txt",
-    "python -c \"assert len(open('migrations/x/state.json').read()) >= 2\"",
-    "cat migrations/x/state.json 2>>errors.log",
-    # read-only uses of the in-place editors and dd
-    "sed -n 1,5p migrations/x/state.json",
-    "sed -E 's/\"//g' migrations/x/state.json",
-    "perl -ne 'print if /phase/' migrations/x/state.json",
-    "perl -MJSON -e 'print 1' migrations/x/state.json",
-    "dd if=migrations/x/state.json of=/dev/null",
+    "cat migrations/x/state.json > /dev/null",
     # a sibling file, consistent with the Edit rule
     "echo x > migrations/x/state.json.bak",
 ])
 def test_bash_reads_and_unrelated_writes_are_allowed(guard, command):
     assert guard.decide(bash(command)) == (0, "")
+
+
+@pytest.mark.parametrize("command", [
+    # The guard is an allowlist: a command that names state.json is
+    # allowed only when every part of it is a known read-only form. These
+    # happen to be reads, but the guard cannot tell a reading python -c,
+    # sed, perl, or dd from a writing one, so they are refused and the
+    # reason points at the state CLI or a plain cat.
+    "python -c \"import json; print(json.load(open('migrations/x/state.json')))\"",
+    "python -c \"assert len(open('migrations/x/state.json').read()) >= 2\"",
+    "sed -n 1,5p migrations/x/state.json",
+    "sed -E 's/\"//g' migrations/x/state.json",
+    "perl -ne 'print if /phase/' migrations/x/state.json",
+    "perl -MJSON -e 'print 1' migrations/x/state.json",
+    "dd if=migrations/x/state.json of=/dev/null",
+    "cat migrations/x/state.json 2>>errors.log",
+    "echo x > out.txt; cat migrations/x/state.json",
+    "cat migrations/x/state.json > /dev/null; echo done",
+])
+def test_reads_outside_the_allowlist_are_refused(guard, command):
+    code, reason = guard.decide(bash(command))
+    assert code == 2 and "state.json" in reason
+    assert "dbdrift.py state" in reason
 
 
 @pytest.mark.parametrize("payload", [
@@ -269,12 +284,15 @@ def test_redirect_into_state_json_is_blocked_in_every_form(guard, command):
 
 
 @pytest.mark.parametrize("command", [
-    "echo x > out.txt; cat migrations/x/state.json",
-    "cat migrations/x/state.json > /dev/null; echo done",
+    # The arrow lives inside a quoted argument, so it is not a redirect.
     "git log --format='%h -> %s' -- migrations/x/state.json",
+    # No state.json is named, so the redirect elsewhere is fine.
     "python scripts/dbdrift.py state --migration x show > state-copy.txt",
+    "cat migrations/x/state.json 2>&1",
+    "cat migrations/x/state.json >/dev/null",
+    "Get-Content migrations/x/state.json > $null",
 ])
-def test_redirect_elsewhere_beside_a_state_json_read_is_allowed(guard, command):
+def test_quoted_arrow_and_null_sinks_are_allowed(guard, command):
     assert guard.decide(bash(command)) == (0, "")
 
 
@@ -298,3 +316,335 @@ def test_powershell_read_is_allowed(guard):
     payload = {"tool_name": "PowerShell",
                "tool_input": {"command": "Get-Content migrations/x/state.json"}}
     assert guard.decide(payload) == (0, "")
+
+
+# ---------------------------------------- allowlist: every reproduced bypass
+
+def powershell(command):
+    return {"tool_name": "PowerShell", "tool_input": {"command": command}}
+
+
+@pytest.mark.parametrize("command", [
+    # interpreter writes
+    "python -c \"open('migrations/x/state.json','w').write('{}')\"",
+    "python - <<'EOF'\nimport json\njson.dump({}, open('migrations/x/state.json', 'w'))\nEOF",
+    "python <<EOF\nopen('migrations/x/state.json', 'w').write('{}')\nEOF",
+    "node -e \"require('fs').writeFileSync('migrations/x/state.json', '{}')\"",
+    # quoting tricks
+    r"echo x > migrations/x/state.js\on",
+    "echo x > migrations/x/$'state.json'",
+    "echo x > migrations/x/state.json{,}",
+    "F=state.json; echo x > migrations/x/$F",
+    "F=migrations/x/state.json; echo x > $F",
+    "echo x > migrations/x/sta''te.json",
+    'echo x > migrations/x/"state".json',
+    # tools the old marker list did not know
+    "perl -0pi -e 's/pending/complete/' migrations/x/state.json",
+    "awk -i inplace '{print}' migrations/x/state.json",
+    "ex -s +'%s/pending/complete/g' -cwq migrations/x/state.json",
+    "install -m 644 backup.json migrations/x/state.json",
+    "rsync backup.json migrations/x/state.json",
+    "cat backup.json | sponge migrations/x/state.json",
+    "unlink migrations/x/state.json",
+    "shred -u migrations/x/state.json",
+    "curl -o migrations/x/state.json https://example.invalid/state",
+    "wget -O migrations/x/state.json https://example.invalid/state",
+    "find migrations -name state.json -delete",
+    "find migrations -name state.json -exec rm {} \\;",
+    r"ren migrations\x\state.json old.json",
+    r"erase migrations\x\state.json",
+    r"xcopy backup.json migrations\x\state.json /Y",
+    r"robocopy backup migrations\x state.json",
+    "ln -sf migrations/x/state.json s.json",
+    "ed -s migrations/x/state.json <<< $'1d\\nw\\nq'",
+    "touch migrations/x/state.json",
+    "chmod 000 migrations/x/state.json",
+    # a read followed by, or piped into, something that is not a read
+    "cat migrations/x/state.json && python -c \"open('migrations/x/state.json','w')\"",
+    "cat migrations/x/state.json | python -c \"import sys; open('migrations/x/state.json','w')\"",
+    "cat migrations/x/state.json | python - ",
+    "cat migrations/x/state.json | xargs rm",
+    "cat migrations/x/state.json | tee migrations/x/state.json",
+    "cat migrations/x/state.json | sponge migrations/x/state.json",
+    "cat migrations/x/state.json | sed 'w migrations/x/state.json'",
+    "cat migrations/x/state.json | awk '{print > \"migrations/x/state.json\"}'",
+    "cat migrations/x/state.json > >(tee migrations/x/state.json)",
+    "grep phase migrations/x/state.json | head; rm -rf migrations/x",
+    "cat migrations/x/state.json\nrm migrations/x/state.json",
+    "export F=migrations/x/state.json",
+    # 8.3 short names in a shell command
+    r"echo x > D:\proj\MIGRAT~1\x\STATE~1.JSO",
+    r"del D:\proj\migrat~1\x\state~1.jso",
+    # a heredoc report that quotes the file name and writes elsewhere;
+    # the Write tool is the way to produce such a file
+    "cat > migrations/x/artifacts/report.md <<'EOF'\nSee state.json for the phase.\nEOF",
+])
+def test_every_bash_bypass_is_blocked(guard, command):
+    code, reason = guard.decide(bash(command))
+    assert code == 2 and "state.json" in reason, command
+    assert "dbdrift.py state" in reason
+
+
+@pytest.mark.parametrize("command", [
+    # globs and directory removal never spell out state.json
+    "rm migrations/x/*.json",
+    "rm migrations/x/state.js*",
+    "rm -rf migrations/x",
+    "rm -rf migrations",
+    "rm -rf ./migrations/",
+    "rm -r sandbox/r/migrations/x",
+    "rm -rf *",
+    "rm */*/*.json",
+    "rm -f state.jso?",
+    "find migrations -name '*.json' -delete",
+    "find . -path '*/migrations/*' -delete",
+    "mv migrations/x migrations/x.old",
+    "cp -r backup/ migrations/x/",
+    "rsync -a backup/ migrations/x/",
+    "install -D backup.json migrations/x/other.json",
+    "shred -u migrations/x/*",
+    r"rd /s /q migrations\x",
+    r"rmdir /s migrations\x",
+    r"del migrations\x\*.json",
+    r"erase migrations\x\*",
+    r"ren migrations\x\state.js* old.json",
+    r"xcopy backup migrations\x /E /Y",
+    r"robocopy backup migrations\x /MIR",
+    r"move migrations\x migrations\x.old",
+    "Remove-Item -Recurse -Force migrations/x",
+    "ri -r migrations/x",
+    "Remove-Item migrations/x/*.json",
+    "Move-Item migrations/x migrations/x.old",
+    "mi migrations/x migrations/x.old",
+    "Rename-Item migrations/x/state.js* old.json",
+    "rni migrations/x x.old",
+    "Copy-Item -Recurse backup/ migrations/x/",
+    "cpi backup.json migrations/x/",
+    "New-Item -Force -Path migrations/x/state.js -Value '{}'",
+    "ni -Force migrations/x/other.json",
+    "Clear-Content migrations/x/*.json",
+    "clc migrations/x/*",
+    "Set-Content migrations/x/*.json '{}'",
+    "sc migrations/x/other.json '{}'",
+    "Add-Content migrations/x/*.json '{}'",
+    "ac migrations/x/other.json '{}'",
+    "'{}' | Out-File migrations/x/other.json",
+    "Get-ChildItem migrations/x | Export-Csv migrations/x/list.csv",
+    "Export-Clixml -Path migrations/x/state.xml -InputObject 1",
+    "[IO.File]::Delete('migrations/x/other.json')",
+    "[System.IO.File]::WriteAllText('migrations/x/other.json', '{}')",
+    "[IO.Directory]::Delete('migrations/x', $true)",
+    "Invoke-WebRequest https://example.invalid -OutFile migrations/x/s.json",
+])
+def test_deleting_or_globbing_into_migrations_is_blocked(guard, command):
+    code, reason = guard.decide(bash(command))
+    assert code == 2 and "state.json" in reason, command
+    code, reason = guard.decide(powershell(command))
+    assert code == 2 and "state.json" in reason, command
+
+
+@pytest.mark.parametrize("command", [
+    # PowerShell aliases and .NET
+    "sc migrations/x/state.json '{}'",
+    "sc -Path migrations/x/state.json -Value '{}'",
+    "ac migrations/x/state.json '{}'",
+    "clc migrations/x/state.json",
+    "ri migrations/x/state.json",
+    "rd migrations/x",
+    "mi backup.json migrations/x/state.json",
+    "rni migrations/x/state.json old.json",
+    "Rename-Item migrations/x/state.json old.json",
+    "ni -Force migrations/x/state.json",
+    "New-Item -Force -Path migrations/x/state.json",
+    "New-Item migrations/x/state.json -Value '{}'",
+    "'{}' | Tee-Object -FilePath migrations/x/state.json",
+    "'{}' | tee migrations/x/state.json",
+    "'{}' | Tee-Object migrations/x/state.json",
+    "Get-Content backup.json | Export-Csv migrations/x/state.json",
+    "[IO.File]::WriteAllText('migrations/x/state.json', '{}')",
+    "[IO.File]::Delete('migrations/x/state.json')",
+    "[System.IO.File]::WriteAllText('migrations/x/state.json', '{}')",
+    "$f='migrations/x/state.json'; '{}' > $f",
+    "$f = 'migrations/x/state.json'\n'{}' | Set-Content $f",
+    "Get-Content migrations/x/state.json | % { [IO.File]::WriteAllText('migrations/x/state.json', $_) }",
+    "Get-Content migrations/x/state.json | ForEach-Object { sc migrations/x/state.json $_ }",
+    "Get-Content migrations/x/state.json | Out-File migrations/x/state.json",
+    "Get-Content migrations/x/state.json | Set-Content migrations/x/state.json",
+    "gc migrations/x/state.json | ac migrations/x/state.json",
+    "Get-Content migrations/x/state.json > migrations/x/state.json",
+    "Get-Content migrations/x/state.json 2> migrations/x/state.json",
+    "Get-Content migrations/x/state.json; ri migrations/x/state.json",
+    "Get-Content migrations/x/state.json | Where-Object { ri migrations/x/state.json }",
+    "Get-Content migrations/x/state.json | select @{n='x';e={[IO.File]::Delete('migrations/x/state.json')}}",
+    "Invoke-WebRequest https://example.invalid -OutFile migrations/x/state.json",
+    "iwr https://example.invalid -OutFile migrations/x/state.json",
+    "Start-Process notepad migrations/x/state.json",
+    "Invoke-Expression \"sc migrations/x/state.json '{}'\"",
+    r"Get-Content D:\proj\MIGRAT~1\x\STATE~1.JSO | Set-Content D:\proj\MIGRAT~1\x\STATE~1.JSO",
+])
+def test_every_powershell_bypass_is_blocked(guard, command):
+    code, reason = guard.decide(powershell(command))
+    assert code == 2 and "state.json" in reason, command
+    assert "dbdrift.py state" in reason
+
+
+@pytest.mark.parametrize("command", [
+    "cat migrations/x/state.json",
+    "python scripts/dbdrift.py state --migration x show",
+    'python "D:/plugin/scripts/dbdrift.py" state --root sandbox/r --migration x verify',
+    "python '/opt/plugin/scripts/dbdrift.py' state --migration x show",
+    r'python "D:\plugin\scripts\dbdrift.py" state --migration x show',
+    'python "$SCRIPTS" state --migration x show',
+    'python "${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py" state --migration x show',
+    "python3 scripts/dbdrift.py state --migration x show",
+    "py scripts/dbdrift.py state --migration x show 2>&1",
+    "grep -n phase migrations/x/state.json | head",
+    "Get-Content migrations/x/state.json",
+    "gc migrations/x/state.json | ConvertFrom-Json | Select-Object phase",
+    "Get-Content migrations/x/state.json | Select-String phase",
+    "Test-Path migrations/x/state.json",
+    "git diff migrations/x/migration.yaml",
+    "git status --short migrations/x/state.json",
+    "git show HEAD:migrations/x/state.json",
+    "rm -rf sandbox/release",
+    "rm -rf sandbox/release/*",
+    "Remove-Item -Recurse -Force sandbox/release",
+    "rm -rf build/ dist/ *.egg-info",
+    "head -c 200 migrations/x/state.json",
+    "tail -n 5 migrations/x/state.json",
+    "less migrations/x/state.json",
+    "more migrations/x/state.json",
+    "rg phase migrations/x/state.json",
+    "egrep phase migrations/x/state.json",
+    "wc -l migrations/x/state.json",
+    "stat migrations/x/state.json",
+    "ls -la migrations/x/state.json",
+    r"dir migrations\x\state.json",
+    "diff migrations/x/state.json migrations/y/state.json",
+    "jq .phase migrations/x/state.json",
+    "jq -r '.phases[] | .name' migrations/x/state.json | sort | uniq -c",
+    "cat migrations/x/state.json | jq .phase | head -1",
+    "cat migrations/x/state.json | grep -i phase | sort | uniq | wc -l",
+    "sls phase migrations/x/state.json",
+    "Select-String -Path migrations/x/state.json -Pattern phase",
+    "Get-Content migrations/x/state.json | ConvertFrom-Json | Format-List",
+    # a migrations path with no writer and no state.json is fine
+    "ls migrations/x/artifacts",
+    "python scripts/dbdrift.py checksum --root . --migration x",
+    'python "$SCRIPTS" inventory --root sandbox/r --migration x',
+    "python scripts/dbdrift.py state --migration x fail-phase --reason 'rm of migrations/x/tmp failed'",
+    "git commit -m 'docs: describe migrations/x layout'",
+    "mkdir -p migrations/x/artifacts",
+    "cat migrations/x/migration.yaml",
+    "echo x > migrations/x/artifacts/notes.txt",
+])
+def test_read_only_forms_and_unrelated_work_stay_allowed(guard, command):
+    assert guard.decide(bash(command)) == (0, ""), command
+    assert guard.decide(powershell(command)) == (0, ""), command
+
+
+def test_edit_on_migration_yaml_and_read_of_state_json_stay_allowed(guard):
+    assert guard.decide(edit("migrations/x/migration.yaml")) == (0, "")
+    assert guard.decide(edit("migrations/x/state.json", tool="Read")) == (0, "")
+
+
+# ------------------------------------------- editing tools: path normalization
+
+@pytest.mark.parametrize("path", [
+    r"D:\proj\MIGRAT~1\x\STATE~1.JSO",
+    r"d:\proj\migrat~1\x\state~1.jso",
+    "MIGRAT~1/x/STATE~1.JSO",
+    r"D:\proj\migrations\x\STATE~1.JSO",
+    r"D:\proj\MIGRAT~1\x\state.json",
+    r"D:\proj\migrations\x\..\x\state.json",
+    "migrations/x/./state.json",
+])
+@pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+def test_short_names_and_dot_segments_are_blocked(guard, path, tool):
+    code, reason = guard.decide(edit(path, tool=tool))
+    assert code == 2 and "state.json" in reason
+
+
+def test_notebook_edit_short_name_is_blocked(guard):
+    payload = {"tool_name": "NotebookEdit",
+               "tool_input": {"notebook_path": r"D:\p\MIGRAT~1\x\STATE~1.JSO"}}
+    assert guard.decide(payload)[0] == 2
+
+
+def test_symlink_to_state_json_is_blocked(guard, tmp_path):
+    real = tmp_path / "migrations" / "x" / "state.json"
+    real.parent.mkdir(parents=True)
+    real.write_text("{}", encoding="utf-8")
+    alias_dir = tmp_path / "scratch"
+    alias_dir.mkdir()
+    alias = alias_dir / "s.json"
+    try:
+        alias.symlink_to(real)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not permitted for this user")
+    code, reason = guard.decide(edit(str(alias)))
+    assert code == 2 and "state.json" in reason
+
+
+def test_directory_junction_or_link_is_blocked(guard, tmp_path):
+    real_dir = tmp_path / "migrations" / "x"
+    real_dir.mkdir(parents=True)
+    (real_dir / "state.json").write_text("{}", encoding="utf-8")
+    link = tmp_path / "ws"
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(real_dir)],
+                           check=True, capture_output=True)
+        else:
+            link.symlink_to(real_dir, target_is_directory=True)
+    except (OSError, NotImplementedError, subprocess.CalledProcessError):
+        pytest.skip("directory links are not permitted for this user")
+    code, reason = guard.decide(edit(str(link / "state.json")))
+    assert code == 2 and "state.json" in reason
+
+
+def test_missing_paths_still_decide_without_touching_the_filesystem(guard):
+    # realpath is only consulted for a path that exists; a missing one is
+    # judged on its text alone and must not raise.
+    assert guard.decide(edit("does/not/exist/migrations/x/state.json"))[0] == 2
+    assert guard.decide(edit("does/not/exist/x/other.json")) == (0, "")
+
+
+# ------------------------------------------ plugin hooks.json (finding B)
+
+PLUGIN_HOOKS = ROOT / "hooks" / "hooks.json"
+GUARDED_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash",
+                 "PowerShell"}
+
+
+def test_plugin_hooks_json_registers_the_guard_for_plugin_installs():
+    hooks = json.loads(PLUGIN_HOOKS.read_text(encoding="utf-8"))
+    pre = hooks["hooks"]["PreToolUse"]
+    matched = [entry for entry in pre
+               if any("scripts/hooks/guard_state.py" in h["command"]
+                      for h in entry["hooks"])]
+    assert matched, "no PreToolUse entry names scripts/hooks/guard_state.py"
+    for entry in matched:
+        assert GUARDED_TOOLS <= set(entry["matcher"].split("|"))
+        for h in entry["hooks"]:
+            assert h["type"] == "command"
+            assert "${CLAUDE_PLUGIN_ROOT}" in h["command"]
+            assert "$CLAUDE_PROJECT_DIR" not in h["command"]
+
+
+def test_project_settings_still_name_the_guard():
+    settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    pre = settings["hooks"]["PreToolUse"]
+    matched = [entry for entry in pre
+               if any("scripts/hooks/guard_state.py" in h["command"]
+                      for h in entry["hooks"])]
+    assert matched
+    for entry in matched:
+        assert GUARDED_TOOLS <= set(entry["matcher"].split("|"))
+
+
+def test_module_docstring_names_the_uncovered_cases():
+    text = HOOK.read_text(encoding="utf-8")
+    doc = text.split('"""')[1]
+    for phrase in ("symlink", "sandbox", "runtime", "Write tool", "heredoc"):
+        assert phrase in doc, phrase
