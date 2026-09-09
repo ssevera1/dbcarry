@@ -1,5 +1,16 @@
 # db-drift
 
+> **This repository is an example, offered to foster ideas or to take and
+> adapt. It exists to show how a frontier AI model can carry work that has
+> historically been human-centric and time-consuming: here, migrating a
+> PostgreSQL database to BigQuery with its security controls intact, from
+> discovery through cutover, with the model doing the reading, planning,
+> and checking and a human approving the two gates. It is built for
+> [Claude Code](https://claude.com/claude-code): the commands, subagents,
+> and skills below only run inside it. Treat it as a starting point, not a
+> product; the BigQuery path is proven against an emulator, not a live
+> project.**
+
 db-drift migrates an on-prem PostgreSQL database to a cloud target. Version
 0.2.0 adds Google BigQuery as a target and makes **security parity** the
 distinguishing feature: the pipeline reads the roles, grants, column
