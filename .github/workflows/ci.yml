@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: pytest
+        run: |
+          # `ls a b` exits non-zero when *any* pattern misses, so the old
+          # `ls test_*.py *_test.py` guard always reported "no tests".
+          if ! compgen -G "test_*.py" > /dev/null \
+             && ! compgen -G "*_test.py" > /dev/null \
+             && [ ! -d tests ]; then
+            echo "::warning::No tests found in this repository; nothing to run."
+            exit 0
+          fi
+          pytest -q

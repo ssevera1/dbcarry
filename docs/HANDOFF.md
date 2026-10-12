@@ -373,12 +373,13 @@ asked. Acceptance:
 
 ## How to get help
 
-- The design: `docs/superpowers/specs/2026-09-08-postgres-to-bigquery-security-design.md`.
-  Sections 7 (mapping model), 11 (backends), 17 (safety), and 18 (known
-  limitations) answer most "why does it do that" questions.
-- The implementation plan: `docs/superpowers/plans/2026-09-08-postgres-to-bigquery-security.md`,
-  with the interfaces and the per-task test lists. Where the plan and the
-  code disagree, the code is right and the tests say so.
+- The mapping model: `docs/security-mapping.md` and
+  `skills/security-mapping/references/` (mapping rules, RLS translation,
+  policy tags, verification) answer most "why does it do that" questions.
+  The design spec and implementation plan the code was built from are
+  not part of this public tree; the interfaces they defined are the
+  docstrings and the tests, and where a document and the code disagree,
+  the code is right and the tests say so.
 - The decision log of a run: `migrations/<name>/artifacts/decision-log.md`,
   one line per transition and gate decision, written by the state CLI.
 - The operation log of a run: `migrations/<name>/artifacts/bq-operations.log`,

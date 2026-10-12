@@ -141,9 +141,12 @@ docs/                           spec, plan, handoff, roadmap, security-mapping p
 tests/                          one test module per script module plus the hook
 ```
 
-## When in doubt, read the spec
+## When in doubt, read the prose docs
 
-- Design: `docs/superpowers/specs/2026-09-08-postgres-to-bigquery-security-design.md`
-- Plan: `docs/superpowers/plans/2026-09-08-postgres-to-bigquery-security.md`
-- v0.1.0 Postgres path: `docs/superpowers/specs/2026-09-01-db-drift-design.md`.
-  Contributor workflow: `CONTRIBUTING.md`. Partner handoff: `docs/HANDOFF.md`.
+The design specs and implementation plans are kept out of this public
+tree. What ships in their place: `docs/security-mapping.md` (the
+mapping model, with the demo as the running example),
+`skills/security-mapping/references/` (the rulebook the code follows),
+`docs/HANDOFF.md` (partner handoff), `docs/ROADMAP.md`, and
+`CONTRIBUTING.md` (contributor workflow). Where a document and the code
+disagree, the code is right and the tests say so.

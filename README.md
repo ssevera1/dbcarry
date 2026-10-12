@@ -330,7 +330,7 @@ dbcarry/
 │                                   bq_backend, bq_load, bq_validate (v0.2.0)
 ├── scripts/hooks/guard_state.py    PreToolUse hook: refuses hand edits to state.json
 ├── demo/scenario.md                the retail demo schema and planted findings
-├── docs/                           HANDOFF.md, ROADMAP.md, security-mapping.md, specs and plans
+├── docs/                           HANDOFF.md, ROADMAP.md, security-mapping.md
 └── tests/                          a test module for state, config, pg, inventory, checksum, and
                                     every v0.2.0 module, the hook test, and
                                     fixtures/demo-inventory.json, fixtures/demo-security.json
