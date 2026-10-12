@@ -1,4 +1,4 @@
-# db-drift roadmap
+# dbcarry roadmap
 
 The backlog after v0.2.0, with the reason each item matters, the seam in
 the code where it attaches, and why it was deferred. Items are in the
@@ -14,7 +14,7 @@ README, and every downstream item below inherits the label.
 
 **Seam.**
 
-- `scripts/db_drift/bq_backend.py` (`LiveBackend`), whose every method
+- `scripts/db_carry/bq_backend.py` (`LiveBackend`), whose every method
   renders one argv or REST call and records it in the operation log.
 - `tests/test_bq_backend.py`, which asserts the exact argv per method.
 - `skills/provider-bigquery/SKILL.md`, which carries the banner.
@@ -33,7 +33,7 @@ managed change-data-capture service for PostgreSQL into BigQuery.
 
 **Seam.**
 
-- `state.STRATEGIES` in `scripts/db_drift/state.py`.
+- `state.STRATEGIES` in `scripts/db_carry/state.py`.
 - The strategy rule in `skills/pipeline-core/references/phase-plan.md`
   (today the bigquery branch records the downtime tolerance and, when it
   is `low`, emits a NOTE pointing here).
@@ -59,7 +59,7 @@ migration, and hand work drifts.
 
 **Seam.**
 
-- `render_apply_scripts` in `scripts/db_drift/bq_security.py`, which
+- `render_apply_scripts` in `scripts/db_carry/bq_security.py`, which
   already renders the identity notes from `plan["identity_notes"]` and
   `plan["principals"]`.
 - `bq-security plan --template`, which writes the principal map.
@@ -110,7 +110,7 @@ tags are per column, not per (column, condition), so the plan flags such
 views with the WARNING `security_barrier_view` and leaves them untranslated.
 
 **Seam.** The `security_barrier_views` section of `security.json`
-(`scripts/db_drift/security.py`); the `security_barrier_view` finding in
+(`scripts/db_carry/security.py`); the `security_barrier_view` finding in
 `bq_security.py`; view translation in `bq_schema.translate_schema`, which
 already routes view bodies through `bq_predicate.translate` with table
 context. A translation would decompose the view's WHERE into a row access
@@ -131,7 +131,7 @@ never partitions. On a large fact table (the demo's `orders` has an
 on) the right partition column cuts query cost and makes the row access
 policy cheaper to evaluate.
 
-**Seam.** `translate_schema` in `scripts/db_drift/bq_schema.py`, where
+**Seam.** `translate_schema` in `scripts/db_carry/bq_schema.py`, where
 `cluster_by` is chosen and rendered; the `columns` section of
 `inventory.json` (types and nullability); the row policy predicates in
 `security-plan.json` (a column that every policy filters on is a clustering
@@ -151,7 +151,7 @@ checksum, replicate, export) is PostgreSQL-only.
 
 **Seam.**
 
-- `scripts/db_drift/cli.py` dispatch.
+- `scripts/db_carry/cli.py` dispatch.
 - The `QUERIES` dictionaries in `inventory.py` and `security.py`. Catalog
   queries would need `information_schema` and `mysql.*` equivalents, and
   MySQL has no row-level security, so the security phase would map only

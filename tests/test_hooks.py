@@ -54,7 +54,7 @@ def test_blocks_bash_redirect_into_state_json(guard):
 
 
 def test_allows_state_cli(guard):
-    cmd = "python scripts/dbdrift.py state --migration x show"
+    cmd = "python scripts/dbcarry.py state --migration x show"
     assert guard.decide(bash(cmd)) == (0, "")
 
 
@@ -70,7 +70,7 @@ def test_settings_json_parses_and_names_hook():
     matchers = [entry["matcher"] for entry in pre]
     assert any("Bash" in m and "Edit" in m and "Write" in m for m in matchers)
     allow = settings["permissions"]["allow"]
-    assert "Bash(python scripts/dbdrift.py:*)" in allow
+    assert "Bash(python scripts/dbcarry.py:*)" in allow
     assert "Bash(python -m pytest:*)" in allow
     assert {"permissions", "hooks"} <= set(settings)
 
@@ -167,7 +167,7 @@ def test_bash_write_forms_are_blocked(guard, command):
 @pytest.mark.parametrize("command", [
     "cat migrations/x/state.json",
     r"type migrations\x\state.json",
-    "python scripts/dbdrift.py state --migration x verify 2>&1",
+    "python scripts/dbcarry.py state --migration x verify 2>&1",
     "git diff -- migrations/x/state.json",
     "grep -n status migrations/x/state.json | head",
     "python -m pytest -q -p no:cacheprovider > out.txt",
@@ -201,7 +201,7 @@ def test_bash_reads_and_unrelated_writes_are_allowed(guard, command):
 def test_reads_outside_the_allowlist_are_refused(guard, command):
     code, reason = guard.decide(bash(command))
     assert code == 2 and "state.json" in reason
-    assert "dbdrift.py state" in reason
+    assert "dbcarry.py state" in reason
 
 
 @pytest.mark.parametrize("payload", [
@@ -287,7 +287,7 @@ def test_redirect_into_state_json_is_blocked_in_every_form(guard, command):
     # The arrow lives inside a quoted argument, so it is not a redirect.
     "git log --format='%h -> %s' -- migrations/x/state.json",
     # No state.json is named, so the redirect elsewhere is fine.
-    "python scripts/dbdrift.py state --migration x show > state-copy.txt",
+    "python scripts/dbcarry.py state --migration x show > state-copy.txt",
     "cat migrations/x/state.json 2>&1",
     "cat migrations/x/state.json >/dev/null",
     "Get-Content migrations/x/state.json > $null",
@@ -382,7 +382,7 @@ def powershell(command):
 def test_every_bash_bypass_is_blocked(guard, command):
     code, reason = guard.decide(bash(command))
     assert code == 2 and "state.json" in reason, command
-    assert "dbdrift.py state" in reason
+    assert "dbcarry.py state" in reason
 
 
 @pytest.mark.parametrize("command", [
@@ -485,19 +485,19 @@ def test_deleting_or_globbing_into_migrations_is_blocked(guard, command):
 def test_every_powershell_bypass_is_blocked(guard, command):
     code, reason = guard.decide(powershell(command))
     assert code == 2 and "state.json" in reason, command
-    assert "dbdrift.py state" in reason
+    assert "dbcarry.py state" in reason
 
 
 @pytest.mark.parametrize("command", [
     "cat migrations/x/state.json",
-    "python scripts/dbdrift.py state --migration x show",
-    'python "D:/plugin/scripts/dbdrift.py" state --root sandbox/r --migration x verify',
-    "python '/opt/plugin/scripts/dbdrift.py' state --migration x show",
-    r'python "D:\plugin\scripts\dbdrift.py" state --migration x show',
+    "python scripts/dbcarry.py state --migration x show",
+    'python "D:/plugin/scripts/dbcarry.py" state --root sandbox/r --migration x verify',
+    "python '/opt/plugin/scripts/dbcarry.py' state --migration x show",
+    r'python "D:\plugin\scripts\dbcarry.py" state --migration x show',
     'python "$SCRIPTS" state --migration x show',
-    'python "${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py" state --migration x show',
-    "python3 scripts/dbdrift.py state --migration x show",
-    "py scripts/dbdrift.py state --migration x show 2>&1",
+    'python "${CLAUDE_PLUGIN_ROOT}/scripts/dbcarry.py" state --migration x show',
+    "python3 scripts/dbcarry.py state --migration x show",
+    "py scripts/dbcarry.py state --migration x show 2>&1",
     "grep -n phase migrations/x/state.json | head",
     "Get-Content migrations/x/state.json",
     "gc migrations/x/state.json | ConvertFrom-Json | Select-Object phase",
@@ -530,9 +530,9 @@ def test_every_powershell_bypass_is_blocked(guard, command):
     "Get-Content migrations/x/state.json | ConvertFrom-Json | Format-List",
     # a migrations path with no writer and no state.json is fine
     "ls migrations/x/artifacts",
-    "python scripts/dbdrift.py checksum --root . --migration x",
+    "python scripts/dbcarry.py checksum --root . --migration x",
     'python "$SCRIPTS" inventory --root sandbox/r --migration x',
-    "python scripts/dbdrift.py state --migration x fail-phase --reason 'rm of migrations/x/tmp failed'",
+    "python scripts/dbcarry.py state --migration x fail-phase --reason 'rm of migrations/x/tmp failed'",
     "git commit -m 'docs: describe migrations/x layout'",
     "mkdir -p migrations/x/artifacts",
     "cat migrations/x/migration.yaml",

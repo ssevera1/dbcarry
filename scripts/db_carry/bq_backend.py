@@ -37,7 +37,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from db_drift import config, pg
+from db_carry import config, pg
 
 ROLE_VIEWER = "roles/bigquery.dataViewer"
 ROLE_EDITOR = "roles/bigquery.dataEditor"
@@ -601,7 +601,7 @@ def _check_member(member):
     forbidden = {m.lower() for m in FORBIDDEN_MEMBERS}
     if member.lower() in forbidden or value.lower() in forbidden:
         raise BackendError(
-            f"refusing to bind {member}: db-drift never widens access to "
+            f"refusing to bind {member}: dbcarry never widens access to "
             "every user")
     if not sep or not value or not _MEMBER_KIND_RE.match(kind):
         raise BackendError(
@@ -1692,7 +1692,7 @@ class EmulatedBackend(Backend):
             "or probe")
 
     def query_fingerprint(self, dataset, table, spec):
-        bq_validate = importlib.import_module("db_drift.bq_validate")
+        bq_validate = importlib.import_module("db_carry.bq_validate")
         self._table(dataset, table)
         rows = self._read_rows(dataset, table)
         return bq_validate.fingerprint_from_rows(rows, spec)
@@ -2375,7 +2375,7 @@ class LiveBackend(Backend):
                 f"count query returned {rows[0]['n']!r} for {dataset}.{table}")
 
     def query_fingerprint(self, dataset, table, spec):
-        bq_validate = importlib.import_module("db_drift.bq_validate")
+        bq_validate = importlib.import_module("db_carry.bq_validate")
         sql = bq_validate.bq_fingerprint_sql(self.project, dataset, table, spec)
         rows = self.query_json(sql)
         if not rows:
@@ -2524,7 +2524,7 @@ def status_document(backend):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py bq-backend")
+    parser = argparse.ArgumentParser(prog="dbcarry.py bq-backend")
     parser.add_argument("--root", default=".",
                         help="project root holding migrations/")
     parser.add_argument("--migration", default=None)

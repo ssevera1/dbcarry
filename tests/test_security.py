@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from db_drift import pg, security
-from db_drift.security import (build_security_inventory, diff_security,
+from db_carry import pg, security
+from db_carry.security import (build_security_inventory, diff_security,
                                sync_roles_sql)
 
 SEP = security.LIST_SEP
@@ -413,8 +413,8 @@ def test_sync_roles_sql_attributes():
               for s in sql if "CREATE ROLE" in s}
     assert 'CREATE ROLE "reporting" NOLOGIN INHERIT;' in create["reporting"]
     assert "duplicate_object" in create["reporting"]
-    assert create["reporting"].startswith("DO $dbdrift$ BEGIN")
-    assert create["reporting"].endswith("END $dbdrift$;")
+    assert create["reporting"].startswith("DO $dbcarry$ BEGIN")
+    assert create["reporting"].endswith("END $dbcarry$;")
     assert 'CREATE ROLE "app_ro" LOGIN INHERIT;' in create["app_ro"]
     assert 'CREATE ROLE "auditor" LOGIN NOINHERIT BYPASSRLS;' \
         in create["auditor"]
@@ -485,10 +485,10 @@ def test_sync_roles_quotes_names_with_dollar_dollar_and_double_quote():
     for s in blocks:
         # The block is delimited by the distinctive tag, so $$ inside a
         # quoted identifier never ends it early.
-        assert s.startswith("DO $dbdrift$ BEGIN ")
+        assert s.startswith("DO $dbcarry$ BEGIN ")
         assert s.endswith("; EXCEPTION WHEN duplicate_object THEN NULL; "
-                          "END $dbdrift$;")
-        assert s.count("$dbdrift$") == 2
+                          "END $dbcarry$;")
+        assert s.count("$dbcarry$") == 2
     joined = "\n".join(sql)
     assert 'CREATE ROLE "x$$; DROP ROLE app_ro; --" LOGIN INHERIT;' in joined
     assert 'CREATE ROLE "sa""y" NOLOGIN INHERIT;' in joined
@@ -499,18 +499,18 @@ def test_sync_roles_quotes_names_with_dollar_dollar_and_double_quote():
 
 def test_sync_roles_refuses_names_containing_the_tag(tmp_path, capsys):
     raw = copy.deepcopy(RAW)
-    raw["roles"].append(["evil$dbdrift$; DROP ROLE app_ro; --", "t", "f",
+    raw["roles"].append(["evil$dbcarry$; DROP ROLE app_ro; --", "t", "f",
                          "t", "f", "f", "f"])
     inv = build_security_inventory(raw)
     with pytest.raises(ValueError) as exc:
         sync_roles_sql(inv)
-    assert "$dbdrift$" in str(exc.value)
+    assert "$dbcarry$" in str(exc.value)
     # A group name carrying the tag is refused too, even when the role
     # list itself is clean.
     inv = _inv()
     inv["memberships"].append({"member": "app_rw",
-                               "group": "g$dbdrift$", "admin_option": False})
-    inv["roles"].append({"name": "g$dbdrift$", "can_login": False,
+                               "group": "g$dbcarry$", "admin_option": False})
+    inv["roles"].append({"name": "g$dbcarry$", "can_login": False,
                          "superuser": False, "inherit": True,
                          "bypass_rls": False, "create_role": False,
                          "create_db": False, "member_of": []})
@@ -522,7 +522,7 @@ def test_sync_roles_refuses_names_containing_the_tag(tmp_path, capsys):
                         "--port", "5", "--dbname", "target", "--dry-run"])
     assert rc == 1
     err = capsys.readouterr().err
-    assert err.startswith("SECURITY ERROR") and "$dbdrift$" in err
+    assert err.startswith("SECURITY ERROR") and "$dbcarry$" in err
 
 
 # ---------------------------------------------------------------------- CLI

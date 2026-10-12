@@ -1,6 +1,6 @@
-# db-drift
+# dbcarry
 
-db-drift migrates an on-prem PostgreSQL database to a cloud target through
+dbcarry migrates an on-prem PostgreSQL database to a cloud target through
 eight phases, two human approval gates, and scripts that do every
 database-touching operation. Version 0.2.0 adds Google BigQuery as a target
 with security parity: the pipeline reads the roles, grants, column privileges,
@@ -15,16 +15,16 @@ This repository is a Claude Code plugin and a Claude Code project at the same
 time. For development, open it with `claude --plugin-dir .` so the commands,
 agents, and skills load from the working tree.
 
-- `commands/` are thin routers. Each `/db-drift:<verb>` reads
+- `commands/` are thin routers. Each `/dbcarry:<verb>` reads
   `skills/pipeline-core/SKILL.md` and executes one playbook under
   `skills/pipeline-core/references/`.
 - `agents/` do judgment work only: read a schema, narrate a security
   inventory, resolve a flagged SQL translation, try to break a finished
   migration. They never move state and never approve gates.
-- `scripts/dbdrift.py` does exact work (inventory, dump, restore, checksums,
+- `scripts/dbcarry.py` does exact work (inventory, dump, restore, checksums,
   translation, apply, verify). Use its verbs and the plugin's commands rather
   than improvising SQL or `bq` calls. Playbooks call it as
-  `python "$SCRIPTS" <verb>` with `$SCRIPTS` = `${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py`.
+  `python "$SCRIPTS" <verb>` with `$SCRIPTS` = `${CLAUDE_PLUGIN_ROOT}/scripts/dbcarry.py`.
 - `skills/provider-*/` hold one provider contract each (provision, connect,
   teardown, cost). `skills/security-mapping/` is the security-phase rulebook.
 
@@ -38,7 +38,7 @@ for acceptance runs.
 The five pipeline rules, restated from `skills/pipeline-core/SKILL.md`:
 
 1. Never edit `state.json` by hand. Every transition goes through
-   `python scripts/dbdrift.py state --migration <name> <verb>`, which validates
+   `python scripts/dbcarry.py state --migration <name> <verb>`, which validates
    it and logs it; `scripts/hooks/guard_state.py` blocks hand edits mechanically.
 2. The source database is read-only. Scripts enforce it through PGOPTIONS;
    the only writes are the ones an approved plan lists.
@@ -65,23 +65,23 @@ The four security-phase rules:
 
 | Phase | Command | Playbook |
 |---|---|---|
-| (workspace) | `/db-drift:init` | `phase-init.md` |
-| assess | `/db-drift:assess` | `phase-assess.md` |
-| plan (Gate 1) | `/db-drift:plan` | `phase-plan.md` |
-| provision | `/db-drift:provision` | `phase-provision.md` |
-| migrate_schema | `/db-drift:migrate-schema` | `phase-schema.md` |
-| migrate_security | `/db-drift:security` | `phase-security.md` |
-| migrate_data | `/db-drift:migrate-data` | `phase-data.md` |
-| validate | `/db-drift:validate` | `phase-validate.md` |
-| cutover (Gate 2) | `/db-drift:cutover` | `phase-cutover.md` |
+| (workspace) | `/dbcarry:init` | `phase-init.md` |
+| assess | `/dbcarry:assess` | `phase-assess.md` |
+| plan (Gate 1) | `/dbcarry:plan` | `phase-plan.md` |
+| provision | `/dbcarry:provision` | `phase-provision.md` |
+| migrate_schema | `/dbcarry:migrate-schema` | `phase-schema.md` |
+| migrate_security | `/dbcarry:security` | `phase-security.md` |
+| migrate_data | `/dbcarry:migrate-data` | `phase-data.md` |
+| validate | `/dbcarry:validate` | `phase-validate.md` |
+| cutover (Gate 2) | `/dbcarry:cutover` | `phase-cutover.md` |
 
-Plus `/db-drift:rollback`, `/db-drift:status`, `/db-drift:autopilot` (every
-phase in order, pausing at the gates), and `/db-drift:demo` (`setup` or
+Plus `/dbcarry:rollback`, `/dbcarry:status`, `/dbcarry:autopilot` (every
+phase in order, pausing at the gates), and `/dbcarry:demo` (`setup` or
 `teardown` of the local demo source).
 
 ## CLI verbs
 
-Everything is `python scripts/dbdrift.py <verb> ...`. Workspace-aware verbs
+Everything is `python scripts/dbcarry.py <verb> ...`. Workspace-aware verbs
 take `--root` (default `.`) and `--migration <name>` and resolve
 `<root>/migrations/<name>/`; artifacts go to `<workspace>/artifacts/`.
 
@@ -104,11 +104,11 @@ python -m pytest -q -p no:cacheprovider
 The suite is unit tests with no database and must be green before any task
 is called done. The emulated demo needs no GCP account:
 
-1. `/db-drift:demo setup` seeds the local "on-prem" PostgreSQL 17 source
+1. `/dbcarry:demo setup` seeds the local "on-prem" PostgreSQL 17 source
    (127.0.0.1:55432, database `retail`, trust auth) including the planted
    security findings listed in `demo/scenario.md`.
-2. `/db-drift:init <name>` with provider `bigquery` and mode `emulated`.
-3. `/db-drift:autopilot`, approving Gate 1 and Gate 2 when presented.
+2. `/dbcarry:init <name>` with provider `bigquery` and mode `emulated`.
+3. `/dbcarry:autopilot`, approving Gate 1 and Gate 2 when presented.
 
 `bq-backend status --migration <name>` shows what the emulator holds and
 `bq-backend reset --migration <name> --yes` clears it. Emulated mode proves
@@ -135,7 +135,7 @@ agents/                         six subagents (discovery, compatibility, validat
 skills/pipeline-core/           shared rules and the per-phase playbooks
 skills/provider-*/              provider contracts (local, gcp, aws, azure, bigquery)
 skills/security-mapping/        mapping rules, RLS translation, policy tags, verification
-scripts/dbdrift.py              the CLI entrypoint; modules in scripts/db_drift/, hook in scripts/hooks/
+scripts/dbcarry.py              the CLI entrypoint; modules in scripts/db_carry/, hook in scripts/hooks/
 demo/scenario.md                the retail demo schema and planted findings
 docs/                           spec, plan, handoff, roadmap, security-mapping prose
 tests/                          one test module per script module plus the hook

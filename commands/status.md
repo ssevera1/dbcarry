@@ -1,8 +1,8 @@
 ---
-description: Show db-drift migration state and the next command
+description: Show dbcarry migration state and the next command
 argument-hint: "[migration-name]"
 ---
-You are running the db-drift status report.
+You are running the dbcarry status report.
 
 1. Read ${CLAUDE_PLUGIN_ROOT}/skills/pipeline-core/SKILL.md and follow
    its hard rules.

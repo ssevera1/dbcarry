@@ -19,7 +19,7 @@ until the gate is approved).
       stops application writes; the pipeline waits for confirmation.
    2. Final sync. logical_replication: wait for zero replication lag
       (replicate wait-synced), then DROP SUBSCRIPTION on the target,
-      then DROP PUBLICATION dbdrift_pub on the source (this listed
+      then DROP PUBLICATION dbcarry_pub on the source (this listed
       source-side change's cleanup is equally authorized as its
       creation was under Gate 1).
       dump_restore: fresh row counts both sides; on drift, reload data
@@ -72,11 +72,11 @@ until the gate is approved).
    before step 2 waits for zero lag.
    For logical_replication strategy only, after dropping the subscription
    on the target, drop the publication on the source with:
-   `python "$SCRIPTS" replicate drop-publication <source flags> --name dbdrift_pub`
+   `python "$SCRIPTS" replicate drop-publication <source flags> --name dbcarry_pub`
    (dump_restore strategy has no publication to drop).
 4. All steps green -> `state complete-phase --phase cutover`. Report:
    the migration is complete, where the target lives (target.json),
-   and that /db-drift:rollback remains available for the back-out path.
+   and that /dbcarry:rollback remains available for the back-out path.
    Any step fails -> `state fail-phase --phase cutover --reason <r>`,
    immediately revert the quiesce (RESET default_transaction_read_only)
    so the source is writable again, and report loudly.
@@ -120,8 +120,8 @@ every number is labeled emulated.
       decommissioning it is a human decision days later, outside this
       pipeline. Remove the staging copies, which hold every row in
       plain text: <workspace>/artifacts/export/ and, in live mode with
-      gcs_bucket set, the objects under gs://<bucket>/db-drift/<name>/
-      (gcloud storage rm -r gs://<bucket>/db-drift/<name>/; NOT
+      gcs_bucket set, the objects under gs://<bucket>/dbcarry/<name>/
+      (gcloud storage rm -r gs://<bucket>/dbcarry/<name>/; NOT
       LIVE-TESTED). No sequence bump.
 
    ## Drift handling
@@ -144,7 +144,7 @@ every number is labeled emulated.
    ## Rollback after cutover
    Apps reconnect to the source; revert its read-only setting
    (ALTER DATABASE <db> RESET default_transaction_read_only). The
-   target keeps the migrated data for investigation; /db-drift:rollback
+   target keeps the migrated data for investigation; /dbcarry:rollback
    removes it after typed confirmation.
    ```
 
@@ -171,7 +171,7 @@ every number is labeled emulated.
 4. All steps green -> `state complete-phase --phase cutover`. Report:
    the migration is complete, where the target lives (target.json:
    project, location, datasets, taxonomy), and that
-   /db-drift:rollback remains available for the back-out path. Any
+   /dbcarry:rollback remains available for the back-out path. Any
    step fails -> `state fail-phase --phase cutover --reason <r>`,
    immediately revert the quiesce (RESET default_transaction_read_only)
    so the source is writable again, and report loudly.

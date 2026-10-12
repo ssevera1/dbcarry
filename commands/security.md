@@ -2,7 +2,7 @@
 description: Apply and verify roles, grants, and row and column security on the target
 argument-hint: "[migration-name]"
 ---
-You are running the db-drift migrate-security phase.
+You are running the dbcarry migrate-security phase.
 
 1. Read ${CLAUDE_PLUGIN_ROOT}/skills/pipeline-core/SKILL.md and follow
    its hard rules.

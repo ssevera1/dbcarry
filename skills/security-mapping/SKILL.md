@@ -1,13 +1,13 @@
 ---
 name: security-mapping
-description: PostgreSQL to BigQuery security parity rulebook for db-drift, roles to principals, grants to IAM, column privileges to policy tags, row-level security to row access policies, and how every control is verified
+description: PostgreSQL to BigQuery security parity rulebook for dbcarry, roles to principals, grants to IAM, column privileges to policy tags, row-level security to row access policies, and how every control is verified
 ---
 
 # Security mapping (PostgreSQL to BigQuery)
 
 The rulebook the plan, migrate_security, and validate playbooks follow
 and the security-analyst, sql-translator, and security-validator agents
-read. The code is the authority: `scripts/db_drift/bq_security.py`
+read. The code is the authority: `scripts/db_carry/bq_security.py`
 (planner, apply scripts, apply, verify, probes), `bq_predicate.py`
 (translator), `bq_backend.py` (emulated and live backends), and
 `security.py` (inventory, diff, role sync). This file and its references
@@ -54,7 +54,7 @@ acceptance run proves; see `skills/provider-bigquery/SKILL.md`.
    some reader of the table cannot read is restricted; restricted
    columns with the same allowed-reader set share one tag named
    `<table>__<first_column>` (plus `_and_<k>_more`) under the taxonomy
-   `dbdrift_<migration>`, created with `activatedPolicyTypes:
+   `dbcarry_<migration>`, created with `activatedPolicyTypes:
    FINE_GRAINED_ACCESS_CONTROL`, which is what makes tags enforced.
    Each allowed reader's principal gets
    `roles/datacatalog.categoryFineGrainedReader` on the tag; the tag is
@@ -149,7 +149,7 @@ apply. The full code list is in `references/mapping-rules.md`.
 
 ## Command sequence
 
-`$SCRIPTS` is `${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py`. `--root` and
+`$SCRIPTS` is `${CLAUDE_PLUGIN_ROOT}/scripts/dbcarry.py`. `--root` and
 `--migration` are accepted before or after the verb on every `bq-*`
 module except `bq-validate compare`, which takes no workspace flags. The `security` module takes connection flags instead
 (`--host`, `--port`, `--dbname`, `--user`, `--password-env`), as

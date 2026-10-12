@@ -1,4 +1,4 @@
-# db-drift v0.2.0 handoff
+# dbcarry v0.2.0 handoff
 
 For the IT partner team receiving this repository as a starter Claude Code
 project.
@@ -33,23 +33,23 @@ was built. Your first task is that first live run.
   dev dependency (`python -m pip install pytest`).
 - Claude Code, current release, with permission to run shell commands.
 - The portable PostgreSQL 17 toolchain for the demo source:
-  `python scripts/dbdrift.py pg ensure-tools` downloads roughly 300 MB
-  under `~/.db-drift/pg/` on first use (override the location with the
-  `DBDRIFT_HOME` environment variable). The unit suite does not need it.
+  `python scripts/dbcarry.py pg ensure-tools` downloads roughly 300 MB
+  under `~/.dbcarry/pg/` on first use (override the location with the
+  `DBCARRY_HOME` environment variable). The unit suite does not need it.
 - Optional, live mode only: the Google Cloud SDK (`gcloud` and `bq` on
   `PATH`) and a sandbox GCP project you can afford to break.
 
 ## Open the repository as a Claude Code project
 
 ```
-git clone <your fork> db-drift
-cd db-drift
+git clone <your fork> dbcarry
+cd dbcarry
 python -m pytest -q -p no:cacheprovider     # expect 1000 passed
 claude --plugin-dir .
 ```
 
 `claude --plugin-dir .` loads the commands, agents, and skills from the
-working tree, so `/db-drift:<verb>` is available immediately and edits to
+working tree, so `/dbcarry:<verb>` is available immediately and edits to
 a playbook take effect on the next command.
 
 What is already configured for you:
@@ -60,16 +60,16 @@ What is already configured for you:
   where to look when in doubt. It also tells Claude to use the plugin's
   verbs rather than improvising SQL or `bq` calls.
 - `.claude/settings.json` carries two things. First, a permission
-  allowlist: `python scripts/dbdrift.py`, `python -m pytest`, read-only
+  allowlist: `python scripts/dbcarry.py`, `python -m pytest`, read-only
   `git`, and read-only `bq` and `gcloud` verbs (`bq show`, `bq ls`,
   `bq get-iam-policy`, `gcloud auth list`, `gcloud config get-value`,
   `gcloud projects get-iam-policy`, `gcloud data-catalog taxonomies list`).
   Every mutating BigQuery call the pipeline makes goes through
-  `scripts/dbdrift.py`. The allow rule matches the relative form
-  `python scripts/dbdrift.py ...`, which is what the pipeline runs when
+  `scripts/dbcarry.py`. The allow rule matches the relative form
+  `python scripts/dbcarry.py ...`, which is what the pipeline runs when
   this checkout is the project directory (the setup above). When the
   plugin is loaded from another directory, the playbooks call
-  `python "<plugin root>/scripts/dbdrift.py"` and that absolute form is
+  `python "<plugin root>/scripts/dbcarry.py"` and that absolute form is
   not covered, so expect one permission prompt per script call or add an
   entry for that path. Widen it for hand checks by adding
   entries such as `"Bash(bq query:*)"` or `"Bash(gcloud data-catalog
@@ -86,7 +86,7 @@ What is already configured for you:
   with no redirect other than to a null device and no pipe into a
   writer), and any command that removes, moves, copies, or writes into a
   `migrations` directory or through a glob that could match `state.json`.
-  The practical consequences: use `python scripts/dbdrift.py state
+  The practical consequences: use `python scripts/dbcarry.py state
   --migration <name> <verb>` for every state change and `state show` or
   `state verify` to read it, and produce any report whose text quotes
   `state.json` with the Write tool, since a shell heredoc that mentions
@@ -105,12 +105,12 @@ where you run Claude Code, never inside the plugin, and `migrations/` and
 Everything below runs offline. Run the commands from your project
 directory inside Claude Code.
 
-1. `/db-drift:demo setup`. First run downloads the PostgreSQL toolchain,
+1. `/dbcarry:demo setup`. First run downloads the PostgreSQL toolchain,
    then creates the `onprem` instance on 127.0.0.1:55432 (trust auth,
    localhost only, wal_level deliberately left at `replica`) and seeds
    database `retail` with 655,000 rows and the planted findings in
    `demo/scenario.md`. Seeding takes a few minutes.
-2. `/db-drift:init demo-bq`. Answer the interview with engine `postgres`,
+2. `/dbcarry:init demo-bq`. Answer the interview with engine `postgres`,
    provider `bigquery`, downtime tolerance `flexible`, the demo source
    defaults (127.0.0.1, 55432, retail, postgres, empty password env), and
    for the `bigquery` block mode `emulated`, project `emulated-project`,
@@ -118,7 +118,7 @@ directory inside Claude Code.
    such as `user:operator@example.com`. Init writes
    `migrations/demo-bq/migration.yaml` and runs a read-only connectivity
    check.
-3. `/db-drift:autopilot`. It executes each phase's own playbook and stops
+3. `/dbcarry:autopilot`. It executes each phase's own playbook and stops
    only at the gates and on failure. Expect these prompts:
    - After assess, the pipeline has written
      `migrations/demo-bq/security/principal-map.yaml` with `app_ro`,
@@ -181,11 +181,11 @@ directory inside Claude Code.
    table that already holds rows is refused (exit 1). Once validation
    passes, delete `artifacts/export/` by hand; the cutover runbook's last
    step says the same.
-5. The emulator's state lives under `~/.db-drift/bq-emulated/demo-bq/`.
-   `python scripts/dbdrift.py bq-backend --migration demo-bq status`
+5. The emulator's state lives under `~/.dbcarry/bq-emulated/demo-bq/`.
+   `python scripts/dbcarry.py bq-backend --migration demo-bq status`
    prints it as JSON; `bq-backend --migration demo-bq reset --yes` deletes
-   it. `/db-drift:rollback` does the same through the playbook after you
-   type the migration name, and `/db-drift:demo teardown` removes the
+   it. `/dbcarry:rollback` does the same through the playbook after you
+   type the migration name, and `/dbcarry:demo teardown` removes the
    `onprem` instance after you type `teardown`.
 
 How long it takes: the script steps finish in seconds each (the whole
@@ -246,10 +246,10 @@ documentation says the CLIs accept; nobody has yet watched it succeed.
      add-iam-policy-binding`, and the Data Catalog REST endpoints for
      taxonomy and policy tag creation (gcloud has no create verb for
      them). The exact argv the backend renders is in
-     `scripts/db_drift/bq_backend.py` and asserted in
+     `scripts/db_carry/bq_backend.py` and asserted in
      `tests/test_bq_backend.py`; `artifacts/bq-apply/*.sh` shows the same
      operations as a shell script for reading, not for running.
-   - Run phase by phase (`/db-drift:assess`, `/db-drift:plan`, and so on)
+   - Run phase by phase (`/dbcarry:assess`, `/dbcarry:plan`, and so on)
      rather than autopilot, and read `artifacts/bq-operations.log` after
      each phase.
    - Read the Gate 1 plan slowly. The security plan is the product.
@@ -264,7 +264,7 @@ documentation says the CLIs accept; nobody has yet watched it succeed.
      (the file says `skipped: true`, `pass: false`) as a failure. The
      `unevaluable` status belongs to emulated mode: it marks a predicate
      the emulator cannot evaluate, and it never passes.
-   - Run `/db-drift:rollback` at the end. It deletes only the datasets in
+   - Run `/dbcarry:rollback` at the end. It deletes only the datasets in
      `target.json` and the migration's taxonomy (datasets first, because
      a tag still attached to a column cannot be deleted), after you type
      the migration name. The project-level `roles/bigquery.jobUser`
@@ -272,14 +272,14 @@ documentation says the CLIs accept; nobody has yet watched it succeed.
      sandbox should be clean. Confirm in the console that nothing else
      changed.
    - Delete the staging files. `artifacts/export/*.ndjson.gz` and any
-     copies under `gs://<gcs_bucket>/db-drift/<migration>/` hold every row
+     copies under `gs://<gcs_bucket>/dbcarry/<migration>/` hold every row
      in plain text, restricted columns and RLS-protected rows included.
      Only the run that loads can remove them (`bq-load run --migration
      <name> --cleanup` deletes each table's copies once its counts
      match); a later `bq-load load --cleanup` refuses the already loaded
      tables and deletes nothing. After the fact, remove them by hand:
      the local directory, and `gcloud storage rm -r
-     gs://<gcs_bucket>/db-drift/<migration>/` for the bucket copies.
+     gs://<gcs_bucket>/dbcarry/<migration>/` for the bucket copies.
    - Record what happened in `docs/live-evidence.md` (see task 1 below),
      including every command that needed a fix.
 
@@ -287,20 +287,20 @@ documentation says the CLIs accept; nobody has yet watched it succeed.
 
 | Concern | File(s) | Test |
 |---|---|---|
-| Type map, identifier sanitizing, export expressions | `scripts/db_drift/bq_types.py` | `tests/test_bq_types.py` |
-| Mapping rules (how a privilege, policy, or role attribute becomes a BigQuery control) and finding codes | `scripts/db_drift/bq_security.py` (`plan_security` and `_Planner`), restated in `skills/security-mapping/references/mapping-rules.md` and `docs/security-mapping.md` | `tests/test_bq_security.py` |
-| Predicate and view-body translator, the auto and review rules | `scripts/db_drift/bq_predicate.py` (`AUTO_FUNCTIONS`, `REVIEW_FUNCTIONS`) | `tests/test_bq_predicate.py` |
-| DDL shape, load schemas, view ordering, matview eligibility | `scripts/db_drift/bq_schema.py` | `tests/test_bq_schema.py` |
-| Backend command forms (`bq`, `gcloud`, REST), the emulator's enforcement rules | `scripts/db_drift/bq_backend.py` (`LiveBackend`, `EmulatedBackend`) | `tests/test_bq_backend.py` |
-| NDJSON export, load, staging cleanup, the controls-before-data guard | `scripts/db_drift/bq_load.py` | `tests/test_bq_load.py` |
-| Fingerprint metrics and normalization | `scripts/db_drift/bq_validate.py` | `tests/test_bq_validate.py` |
-| Security inventory queries, diff, Postgres role sync | `scripts/db_drift/security.py` | `tests/test_security.py` |
-| Phases, strategies, providers, gate positions | `scripts/db_drift/state.py` | `tests/test_state.py` |
-| `migration.yaml` defaults and the principal map loader | `scripts/db_drift/config.py` (`BQ_DEFAULTS`) | `tests/test_config.py` |
+| Type map, identifier sanitizing, export expressions | `scripts/db_carry/bq_types.py` | `tests/test_bq_types.py` |
+| Mapping rules (how a privilege, policy, or role attribute becomes a BigQuery control) and finding codes | `scripts/db_carry/bq_security.py` (`plan_security` and `_Planner`), restated in `skills/security-mapping/references/mapping-rules.md` and `docs/security-mapping.md` | `tests/test_bq_security.py` |
+| Predicate and view-body translator, the auto and review rules | `scripts/db_carry/bq_predicate.py` (`AUTO_FUNCTIONS`, `REVIEW_FUNCTIONS`) | `tests/test_bq_predicate.py` |
+| DDL shape, load schemas, view ordering, matview eligibility | `scripts/db_carry/bq_schema.py` | `tests/test_bq_schema.py` |
+| Backend command forms (`bq`, `gcloud`, REST), the emulator's enforcement rules | `scripts/db_carry/bq_backend.py` (`LiveBackend`, `EmulatedBackend`) | `tests/test_bq_backend.py` |
+| NDJSON export, load, staging cleanup, the controls-before-data guard | `scripts/db_carry/bq_load.py` | `tests/test_bq_load.py` |
+| Fingerprint metrics and normalization | `scripts/db_carry/bq_validate.py` | `tests/test_bq_validate.py` |
+| Security inventory queries, diff, Postgres role sync | `scripts/db_carry/security.py` | `tests/test_security.py` |
+| Phases, strategies, providers, gate positions | `scripts/db_carry/state.py` | `tests/test_state.py` |
+| `migration.yaml` defaults and the principal map loader | `scripts/db_carry/config.py` (`BQ_DEFAULTS`) | `tests/test_config.py` |
 | Playbooks (what Claude does step by step per phase) | `skills/pipeline-core/references/phase-*.md`, `autopilot.md`, `status.md` | driven by hand in the acceptance run |
 | Subagent charters | `agents/*.md` | same |
 | Provider contracts | `skills/provider-*/SKILL.md` | same |
-| Demo data and planted findings | `scripts/db_drift/seed_demo.py`, `demo/scenario.md`, fixtures `tests/fixtures/demo-inventory.json` and `demo-security.json` | every `demo_*` fixture test |
+| Demo data and planted findings | `scripts/db_carry/seed_demo.py`, `demo/scenario.md`, fixtures `tests/fixtures/demo-inventory.json` and `demo-security.json` | every `demo_*` fixture test |
 | Permission allowlist and the guard hook | `.claude/settings.json`, `hooks/hooks.json`, `scripts/hooks/guard_state.py` | `tests/test_hooks.py` |
 
 `CONTRIBUTING.md` describes the workflow for a new mapping rule (code,

@@ -98,7 +98,7 @@ never claims parity for them.
    ```
 
 6. Every rule of step 4 satisfied -> `state complete-phase --phase
-   migrate_security`; next /db-drift:migrate-data. Otherwise
+   migrate_security`; next /dbcarry:migrate-data. Otherwise
    `state fail-phase --phase migrate_security --reason <section and
    first difference>` and stop.
 
@@ -115,10 +115,10 @@ ends with "(emulated)".
    artifacts/translation-review.json is empty), and no finding has code
    rls_deny_all_unassigned (an RLS table that would get no policy and
    stand open). Otherwise apply refuses and names them; the only way
-   through is /db-drift:plan (a resolution through the sql-translator,
+   through is /dbcarry:plan (a resolution through the sql-translator,
    or bigquery.admin_principal set, or the roles mapped) and Gate 1.
 2. `python "$SCRIPTS" bq-security apply --migration <name>`. In this
-   order: the taxonomy dbdrift_<migration> activated for
+   order: the taxonomy dbcarry_<migration> activated for
    FINE_GRAINED_ACCESS_CONTROL and its policy tags (only when
    security-plan.json has policy tags; a source without column grants
    gets no taxonomy, security-applied.json records taxonomy null, and
@@ -186,7 +186,7 @@ ends with "(emulated)".
 
 6. SECURITY VERIFY PASSED with enforcement active -> `state
    complete-phase --phase migrate_security`; next
-   /db-drift:migrate-data. Any failed check, or enforcement_active
+   /dbcarry:migrate-data. Any failed check, or enforcement_active
    false with tags planned -> `state fail-phase --phase migrate_security
    --reason <first failed check name>` and stop. Never load data on a
    failed verification: in live mode bq-load refuses on its own, in

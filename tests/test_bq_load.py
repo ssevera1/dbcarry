@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from db_drift import bq_backend as bb
-from db_drift import bq_load as bl
-from db_drift import pg
+from db_carry import bq_backend as bb
+from db_carry import bq_load as bl
+from db_carry import pg
 
 
 def col(name, data_type, udt, ordinal, **kw):
@@ -488,7 +488,7 @@ def test_run_all_loads_with_the_read_back_schema(tmp_path, emu, monkeypatch):
     # bq-security apply attaches policy tags to the live table only; the
     # plan fields never carry them, so the load must use the read-back
     # schema or the load could strip the controls the data depends on.
-    tax = emu.create_taxonomy("dbdrift_m1", ["FINE_GRAINED_ACCESS_CONTROL"])
+    tax = emu.create_taxonomy("dbcarry_m1", ["FINE_GRAINED_ACCESS_CONTROL"])
     tag = emu.create_policy_tag(tax, "orders__region", "")
     fields = emu.get_table_schema("retail", "orders")
     for f in fields:
@@ -581,12 +581,12 @@ def test_run_all_live_uploads_to_gcs_before_load(tmp_path):
     export_dir = tmp_path / "export"
     report = bl.run_all(plan, {"columns": INVENTORY_COLUMNS}, CI, backend,
                         export_dir, gcs_bucket="my-bucket",
-                        gcs_prefix="db-drift/m1", exporter=FakeExporter())
+                        gcs_prefix="dbcarry/m1", exporter=FakeExporter())
     assert report["pass"] is True
     entry = report["tables"][0]
     # the object name carries the migration so two migrations sharing a
     # bucket never overwrite each other
-    uri = "gs://my-bucket/db-drift/m1/retail/public.orders.ndjson.gz"
+    uri = "gs://my-bucket/dbcarry/m1/retail/public.orders.ndjson.gz"
     assert entry["gcs_uri"] == uri
     local = str(export_dir / "public.orders.ndjson.gz")
     assert runner.calls[1][0] == ["bq", "--project_id=proj", "--format=json",
@@ -647,7 +647,7 @@ def test_run_all_live_cleanup_removes_staged_copies(tmp_path):
                         exporter=FakeExporter(), cleanup=True)
     assert report["pass"] is True
     entry = report["tables"][0]
-    uri = "gs://my-bucket/db-drift/retail/public.orders.ndjson.gz"
+    uri = "gs://my-bucket/dbcarry/retail/public.orders.ndjson.gz"
     assert runner.calls[-1] == (["gcloud", "storage", "rm", uri], None)
     assert entry["cleanup"] == {"local": True, "gcs": True}
     assert not (export_dir / "public.orders.ndjson.gz").exists()
@@ -908,7 +908,7 @@ def test_cli_live_load_runs_after_security_verify_or_force(tmp_path,
     assert "WARNING" not in capsys.readouterr().err
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert kwargs["gcs_prefix"] == "db-drift/m1"
+    assert kwargs["gcs_prefix"] == "dbcarry/m1"
     assert kwargs["cleanup"] is False
     assert args[3].mode == "live"
     report = json.loads((ws / "artifacts" / "load-report.json").read_text(

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from db_drift import bq_backend as bb
-from db_drift import bq_security as bs
-from db_drift import bq_types, config, pg
+from db_carry import bq_backend as bb
+from db_carry import bq_security as bs
+from db_carry import bq_types, config, pg
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROJECT = "proj"
@@ -311,7 +311,7 @@ def test_plan_demo_principals_and_bindings(demo_sec, demo_inv):
     plan = demo_plan(demo_sec, demo_inv)
     assert plan["principals"] == {"app_ro": RO, "app_rw": RW,
                                   "reporting": REPORTING}
-    assert plan["taxonomy"] == {"display_name": "dbdrift_demo",
+    assert plan["taxonomy"] == {"display_name": "dbcarry_demo",
                                 "activated": ["FINE_GRAINED_ACCESS_CONTROL"]}
     assert plan["datasets"] == {"retail": {"source_schema": "public"}}
     assert plan["project"] == PROJECT and plan["mode"] == "emulated"
@@ -361,7 +361,7 @@ def test_plan_demo_policy_tags(demo_sec, demo_inv):
                      "column": "email"}],
         "readers": [{"member": RW, "source_role": "app_rw"}],
         "source_columns": ["public.customers.email"],
-        "description": "db-drift: public.customers.email readable by app_rw"}]
+        "description": "dbcarry: public.customers.email readable by app_rw"}]
     assert plan["masking"] == []
 
 
@@ -886,7 +886,7 @@ def test_render_apply_scripts(demo_sec, demo_inv):
     assert '"groupByEmail": "retail-app-ro@example.com"' in iam
     assert '"tableId": "recent_orders"' in iam
     tags = scripts["40-policy-tags.sh"]
-    assert "FINE_GRAINED_ACCESS_CONTROL" in tags and "dbdrift_demo" in tags
+    assert "FINE_GRAINED_ACCESS_CONTROL" in tags and "dbcarry_demo" in tags
     assert "customers__email" in tags
     assert "policy-tags add-iam-policy-binding" in tags
     assert f"--member='{RW}' --role={bs.ROLE_FGR}" in tags
@@ -1508,7 +1508,7 @@ def test_cli_plan_writes_artifacts(tmp_path, monkeypatch, capsys):
     assert rc == 0 and "security-plan.json" in out
     plan = read_json(art / "security-plan.json")
     assert plan["principals"]["reporting"] == REPORTING
-    assert plan["taxonomy"]["display_name"] == "dbdrift_demo"
+    assert plan["taxonomy"]["display_name"] == "dbcarry_demo"
     assert (art / "security-plan.json").read_text(
         encoding="utf-8").endswith("}\n")
     md = (art / "security-plan.md").read_text(encoding="utf-8")
@@ -2215,10 +2215,10 @@ class _NumberedTagBackend:
         return [{"role": bs.ROLE_VIEWER, "member": RW}]
 
     def list_taxonomies(self):
-        return [{"name": self.tax, "displayName": "dbdrift_demo"}]
+        return [{"name": self.tax, "displayName": "dbcarry_demo"}]
 
     def describe_taxonomy(self, name):
-        return {"name": name, "displayName": "dbdrift_demo",
+        return {"name": name, "displayName": "dbcarry_demo",
                 "activatedPolicyTypes": ["FINE_GRAINED_ACCESS_CONTROL"]}
 
     def list_policy_tags(self, taxonomy):
@@ -2237,7 +2237,7 @@ class _NumberedTagBackend:
 
 
 def test_verify_compares_tag_names_by_taxonomy_suffix():
-    plan = {"taxonomy": {"display_name": "dbdrift_demo",
+    plan = {"taxonomy": {"display_name": "dbcarry_demo",
                          "activated": ["FINE_GRAINED_ACCESS_CONTROL"]},
             "bindings": [], "authorized_views": [], "row_policies": [],
             "policy_tags": [{"name": "customers__email",

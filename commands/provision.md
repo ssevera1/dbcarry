@@ -2,7 +2,7 @@
 description: Create the migration target via the configured provider
 argument-hint: "[migration-name]"
 ---
-You are running the db-drift provision phase.
+You are running the dbcarry provision phase.
 
 1. Read ${CLAUDE_PLUGIN_ROOT}/skills/pipeline-core/SKILL.md and follow
    its hard rules.

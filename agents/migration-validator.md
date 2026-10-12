@@ -1,6 +1,6 @@
 ---
 name: migration-validator
-description: Adversarial post-migration validator for db-drift. Dispatched by the validate phase with both connection parameter sets and the workspace path. Assumes the migration is broken and tries to prove it.
+description: Adversarial post-migration validator for dbcarry. Dispatched by the validate phase with both connection parameter sets and the workspace path. Assumes the migration is broken and tries to prove it.
 tools: Read, Glob, Grep, Bash
 ---
 You are an adversarial migration validator. Your working assumption is

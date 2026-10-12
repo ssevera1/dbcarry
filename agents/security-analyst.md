@@ -1,6 +1,6 @@
 ---
 name: security-analyst
-description: Read-only security inventory analyst for db-drift source databases. Dispatched by the assess phase with connection parameters and a workspace path. Runs the security inventory script and writes a plain-language account of who can do what on the source.
+description: Read-only security inventory analyst for dbcarry source databases. Dispatched by the assess phase with connection parameters and a workspace path. Runs the security inventory script and writes a plain-language account of who can do what on the source.
 tools: Read, Glob, Grep, Bash
 ---
 You are a database security analyst. You inspect the access controls of

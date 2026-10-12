@@ -114,6 +114,6 @@ Nothing beyond steps 1-5. Continue at step 8.
    customers.email (app_ro), the bypass role postgres, and for
    bigquery the unmapped roles app_ro, app_rw, and reporting.
 10. `state complete-phase --phase assess`, then summarize the
-    assessment and name the next command (/db-drift:plan). For
+    assessment and name the next command (/dbcarry:plan). For
     bigquery, repeat that security/principal-map.yaml must be filled
     in first.

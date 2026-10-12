@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-TOOLS_ROOT = Path(os.environ.get("DBDRIFT_HOME", str(Path.home() / ".db-drift")))
+TOOLS_ROOT = Path(os.environ.get("DBCARRY_HOME", str(Path.home() / ".dbcarry")))
 PORTABLE_BIN = TOOLS_ROOT / "pg" / "pgsql" / "bin"
 READONLY_OPTS = "-c default_transaction_read_only=on"
 WRITABLE_OPTS = "-c default_transaction_read_only=off"
@@ -32,7 +32,7 @@ def find_bin(name):
         return str(candidate)
     raise PgError(
         f"{name} not found on PATH or in {PORTABLE_BIN}. "
-        "Run: python scripts/dbdrift.py pg ensure-tools")
+        "Run: python scripts/dbcarry.py pg ensure-tools")
 
 
 def add_conn_args(parser, prefix=""):

@@ -1,4 +1,4 @@
-"""State machine for db-drift migrations.
+"""State machine for dbcarry migrations.
 
 State lives in migrations/<name>/state.json. Every mutation goes through
 this module (as a CLI), validates the transition table, and appends a line
@@ -191,7 +191,7 @@ def log_decision(root, migration, message):
 # ------------------------------------------------------------------------- CLI
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py state")
+    parser = argparse.ArgumentParser(prog="dbcarry.py state")
     parser.add_argument("--root", default=".", help="project root holding migrations/")
     parser.add_argument("--migration", required=True)
     sub = parser.add_subparsers(dest="verb", required=True)

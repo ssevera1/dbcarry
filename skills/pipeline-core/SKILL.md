@@ -1,11 +1,11 @@
 ---
 name: pipeline-core
-description: Shared rules for db-drift migration phases, state, gates, and scripts
+description: Shared rules for dbcarry migration phases, state, gates, and scripts
 ---
 
-# db-drift pipeline core
+# dbcarry pipeline core
 
-db-drift migrates an on-prem PostgreSQL database to a cloud target as a
+dbcarry migrates an on-prem PostgreSQL database to a cloud target as a
 phased pipeline. Phases: assess, plan, provision, migrate_schema,
 migrate_security, migrate_data, validate, cutover. Two human gates:
 plan_approval (before provision) and cutover_approval (before cutover).
@@ -77,9 +77,9 @@ project directory (the shell CWD), never inside the plugin.
 
 ## Running scripts
 
-$SCRIPTS = ${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py, invoked as
+$SCRIPTS = ${CLAUDE_PLUGIN_ROOT}/scripts/dbcarry.py, invoked as
 `python "$SCRIPTS" <verb> ...`. When the plugin checkout is itself the
-project directory, use the relative form `python scripts/dbdrift.py`,
+project directory, use the relative form `python scripts/dbcarry.py`,
 which the project's permission allowlist covers.
 
 Connection-flag verbs (inventory, dump, restore, objcount, checksum,
@@ -141,16 +141,16 @@ verification output that proves it.
 
 | Command | Playbook |
 |---|---|
-| /db-drift:init | references/phase-init.md |
-| /db-drift:assess | references/phase-assess.md |
-| /db-drift:plan | references/phase-plan.md |
-| /db-drift:provision | references/phase-provision.md |
-| /db-drift:migrate-schema | references/phase-schema.md |
-| /db-drift:security | references/phase-security.md |
-| /db-drift:migrate-data | references/phase-data.md |
-| /db-drift:validate | references/phase-validate.md |
-| /db-drift:cutover | references/phase-cutover.md |
-| /db-drift:rollback | references/phase-rollback.md |
-| /db-drift:status | references/status.md |
-| /db-drift:autopilot | references/autopilot.md |
-| /db-drift:demo | references/demo.md |
+| /dbcarry:init | references/phase-init.md |
+| /dbcarry:assess | references/phase-assess.md |
+| /dbcarry:plan | references/phase-plan.md |
+| /dbcarry:provision | references/phase-provision.md |
+| /dbcarry:migrate-schema | references/phase-schema.md |
+| /dbcarry:security | references/phase-security.md |
+| /dbcarry:migrate-data | references/phase-data.md |
+| /dbcarry:validate | references/phase-validate.md |
+| /dbcarry:cutover | references/phase-cutover.md |
+| /dbcarry:rollback | references/phase-rollback.md |
+| /dbcarry:status | references/status.md |
+| /dbcarry:autopilot | references/autopilot.md |
+| /dbcarry:demo | references/demo.md |

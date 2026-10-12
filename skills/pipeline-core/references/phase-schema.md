@@ -24,7 +24,7 @@ conn). Build source flags and target flags for the scripts from them.
    JSON lines, the equal/deferred comparison verdict, and any restore
    warnings verbatim.
 5. Equal -> `state complete-phase --phase migrate_schema`; next
-   /db-drift:security (role sync and the parity diff). Not equal ->
+   /dbcarry:security (role sync and the parity diff). Not equal ->
    `state fail-phase` with the first difference as the reason.
 
 ## Provider: bigquery
@@ -35,7 +35,7 @@ LIVE-TESTED; label emulated counts as emulated.
 
 1. Precondition: the views section of artifacts/translation-review.json
    is empty. Otherwise `bq-schema apply` refuses and names the views;
-   the only way through is /db-drift:plan (the sql-translator step and
+   the only way through is /dbcarry:plan (the sql-translator step and
    Gate 1).
 2. `python "$SCRIPTS" bq-schema apply --migration <name>`: datasets
    (already present), then every table (CREATE TABLE IF NOT EXISTS with
@@ -65,5 +65,5 @@ LIVE-TESTED; label emulated counts as emulated.
      and the rest;
    - the path of artifacts/bq-apply/20-tables.sql for hand review.
 5. SCHEMA VERIFY PASSED -> `state complete-phase --phase migrate_schema`;
-   next /db-drift:security. FAILED -> `state fail-phase --phase
+   next /dbcarry:security. FAILED -> `state fail-phase --phase
    migrate_schema --reason <first missing or mismatched object>`.

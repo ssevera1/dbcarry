@@ -1,6 +1,6 @@
 ---
 name: provider-bigquery
-description: Google BigQuery target provider for db-drift, emulated on a laptop or live through bq, gcloud, and the Data Catalog API, with security parity controls
+description: Google BigQuery target provider for dbcarry, emulated on a laptop or live through bq, gcloud, and the Data Catalog API, with security parity controls
 ---
 
 # Provider: Google BigQuery
@@ -33,8 +33,8 @@ the mode itself; only the prerequisite check and the teardown differ.
 
 - A JSON model of one BigQuery project on local disk. State lives at
   `bq_backend.emulated_root(<migration>)`, which is
-  `~/.db-drift/bq-emulated/<migration>/` (`DBDRIFT_HOME` replaces
-  `~/.db-drift`). `state.json` there holds datasets, tables and their
+  `~/.dbcarry/bq-emulated/<migration>/` (`DBCARRY_HOME` replaces
+  `~/.dbcarry`). `state.json` there holds datasets, tables and their
   schemas, IAM bindings, dataset access lists, taxonomies, policy tags,
   and row access policies; `data/<dataset>/<table>.ndjson.gz` holds the
   loaded rows, line for line as exported (numbers are read as Decimal,
@@ -148,7 +148,7 @@ allowlist in `.claude/settings.json`; the other checks prompt.
 | Roles and grants | IAM roles dataViewer, dataEditor, metadataViewer, dataOwner at table, dataset, or project scope, plus jobUser on the project to run queries at all. No write-only role: dataEditor also reads |
 | Row-level security | Row access policies with OR semantics: a principal sees the union of rows from every policy that names it, and a table with at least one policy shows no rows to anyone no policy names. They filter reads and the target rows of DML; there is no WITH CHECK and no per-command policy |
 | Column-level security | Data Catalog policy tags, enforced only while the taxonomy is activated for FINE_GRAINED_ACCESS_CONTROL; one tag per column; read control only, no column-level write control |
-| Masking | Data policies through the separate bigquerydatapolicy API. db-drift renders the request bodies (60-masking-requests.json) and does not execute them |
+| Masking | Data policies through the separate bigquerydatapolicy API. dbcarry renders the request bodies (60-masking-requests.json) and does not execute them |
 | Views | Views, and authorized views through a dataset access entry. Bodies go through the translator. A view runs with the querying principal's row policies and tags, where PostgreSQL evaluates it as the owner |
 | Materialized views | Only when the translated body has none of ORDER BY, LIMIT, HAVING, a set operation, a window function or WINDOW clause, a non-deterministic function, or a view reference; otherwise a plain view with a WARNING. BigQuery caps materialized views per base table (20 at the time of writing) |
 | Quotas that matter | Row access policies: 400 per table, 6,000 per query, and 5 CREATE or DROP ROW ACCESS POLICY statements per table per 10 seconds (apply creates them one at a time; a table with many mapped roles can hit it). Policy tags: 100 per taxonomy, 40 taxonomies per project, hierarchy depth 5. Authorized resources: 2,500 per dataset. Verify current values before a large run |
@@ -185,7 +185,7 @@ in migrate_schema, controls in migrate_security.
      "project": "<bigquery.project>",
      "location": "<bigquery.location>",
      "datasets": ["retail"],
-     "taxonomy": "dbdrift_<migration>"
+     "taxonomy": "dbcarry_<migration>"
    }
    ```
 
@@ -216,7 +216,7 @@ Irreversible either way; the caller must have collected the typed
 migration name first (rollback playbook step 2).
 
 Emulated: `python "$SCRIPTS" bq-backend reset --migration <name> --yes`
-removes `~/.db-drift/bq-emulated/<name>/` and refuses any path that is
+removes `~/.dbcarry/bq-emulated/<name>/` and refuses any path that is
 not a direct child of `bq-emulated`, and refuses when the state file
 records a different workspace than the one running the command. Without
 `--yes` it prints what it would delete and exits 2.
@@ -249,7 +249,7 @@ runs these, in this order, and records each output:
    (`gcloud projects remove-iam-policy-binding <project> --member=<m>
    --role=roles/bigquery.jobUser --condition=None`).
 5. Staging: `artifacts/export/*.ndjson.gz` and any GCS copies under
-   `gs://<gcs_bucket>/db-drift/<migration>/` hold every row in plain
+   `gs://<gcs_bucket>/dbcarry/<migration>/` hold every row in plain
    text. Delete them (`bq-load load --cleanup` did it per table when
    counts matched; otherwise by hand).
 

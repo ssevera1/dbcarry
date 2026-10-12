@@ -8,7 +8,7 @@ Bash, or PowerShell tool call and passes the call as JSON on stdin:
 Exit code 2 blocks the call and shows stderr to the model. Exit code 0
 allows it and prints nothing. Hard rule 1 of skills/pipeline-core/SKILL.md
 says the state file is never hand-edited: every transition goes through
-`python scripts/dbdrift.py state ...`, which validates the transition and
+`python scripts/dbcarry.py state ...`, which validates the transition and
 appends to the decision log. This hook makes that rule mechanical.
 
 The guard is an allowlist, not a list of known write markers. Three
@@ -33,7 +33,7 @@ rules decide a call:
    newline separated segment starts with cat, head, tail, less, more,
    grep, rg, egrep, wc, stat, ls, dir, diff, jq, type, Get-Content, gc,
    Select-String, sls, Test-Path, `git status|diff|log|show`, or
-   `python <path to dbdrift.py> state` (the script path may be relative,
+   `python <path to dbcarry.py> state` (the script path may be relative,
    absolute, quoted, or `$SCRIPTS`); every pipe stage after the first is
    a known filter (the same readers plus sort, uniq, cut, tr, column,
    nl, sed, awk, Select-Object, ConvertFrom-Json, Format-List, and their
@@ -69,7 +69,7 @@ rules decide a call:
    under a literal directory that is not migrations (`rm -rf sandbox/*`)
    and a removal that never mentions migrations (`rm -rf sandbox/release`)
    pass, since sandbox cleanup is legitimate. A single, unpiped, unredirected
-   `python .../dbdrift.py <verb>` call is exempt from this rule so a
+   `python .../dbcarry.py <verb>` call is exempt from this rule so a
    `--reason` string may mention rm and a path.
 
 What remains uncovered, by design of a text-only guard: a symlink or
@@ -102,7 +102,7 @@ PATH_KEYS = ("file_path", "notebook_path")
 STATE_FILE = "state.json"
 MIGRATIONS_DIR = "migrations"
 
-STATE_CLI = "python scripts/dbdrift.py state --migration <name> <verb> ..."
+STATE_CLI = "python scripts/dbcarry.py state --migration <name> <verb> ..."
 
 # 8.3 short names Windows may hand back for the two directory and file
 # names the guard cares about. Expanded before every comparison.
@@ -142,18 +142,18 @@ READERS = (
     r"cat|head|tail|less|more|grep|rg|egrep|fgrep|wc|stat|ls|dir|diff|jq"
     r"|type|get-content|gc|select-string|sls|test-path"
 )
-DBDRIFT_SCRIPT = (
-    r"(?:\"[^\"]*dbdrift\.py\"|'[^']*dbdrift\.py'|[^\s\"']*dbdrift\.py"
+DBCARRY_SCRIPT = (
+    r"(?:\"[^\"]*dbcarry\.py\"|'[^']*dbcarry\.py'|[^\s\"']*dbcarry\.py"
     r"|\"?\$\{?scripts\}?\"?)"
 )
 PYTHON = r"(?:python3?|py)(?:\.exe)?"
 READ_ONLY_START = re.compile(
     r"^(?:" + READERS + r")(?=\s|$)"
     r"|^git\s+(?:status|diff|log|show)(?=\s|$)"
-    r"|^" + PYTHON + r"\s+" + DBDRIFT_SCRIPT + r"\s+state(?=\s|$)"
+    r"|^" + PYTHON + r"\s+" + DBCARRY_SCRIPT + r"\s+state(?=\s|$)"
 )
-DBDRIFT_CALL = re.compile(
-    r"^" + PYTHON + r"\s+" + DBDRIFT_SCRIPT + r"\s+[a-z][\w-]*(?=\s|$)"
+DBCARRY_CALL = re.compile(
+    r"^" + PYTHON + r"\s+" + DBCARRY_SCRIPT + r"\s+[a-z][\w-]*(?=\s|$)"
 )
 
 FILTERS = (
@@ -194,7 +194,7 @@ WRITERS = re.compile(
 
 def _reason(what):
     return (
-        f"db-drift guard: refusing {what}. A migration's state.json is never "
+        f"dbcarry guard: refusing {what}. A migration's state.json is never "
         "hand-edited (pipeline-core hard rule 1). Change state through the "
         f"state CLI instead: {STATE_CLI} (verbs: init, start-phase, "
         "complete-phase, fail-phase, approve-gate, decline-gate, set-strategy, "
@@ -373,7 +373,7 @@ def _read_only_problem(command):
         if not READ_ONLY_START.search(first):
             return (f"'{first.split()[0]}' is not a known read-only command "
                     "(cat, head, tail, grep, jq, Get-Content, git diff, "
-                    "python scripts/dbdrift.py state, and the like)")
+                    "python scripts/dbcarry.py state, and the like)")
         for stage, _ in stages[1:]:
             stage = stage.strip().lower()
             if not FILTER_START.search(stage):
@@ -424,9 +424,9 @@ def _glob_could_hit_state(texts):
     return False
 
 
-def _is_bare_dbdrift_call(command):
+def _is_bare_dbcarry_call(command):
     masked, balanced = _mask_quotes(command)
-    if not balanced or not DBDRIFT_CALL.search(command.strip().lower()):
+    if not balanced or not DBCARRY_CALL.search(command.strip().lower()):
         return False
     if SEPARATORS.search(masked) or PIPES.search(masked):
         return False
@@ -442,7 +442,7 @@ def _decide_shell(tool, command):
             return 2, _reason(f"a {tool} command that names state.json and "
                               f"is not a read-only form: {problem}")
     writer = WRITERS.search(command)
-    if writer and not _is_bare_dbdrift_call(command):
+    if writer and not _is_bare_dbcarry_call(command):
         mentions_migrations = any(MIGRATIONS_MENTION.search(t) for t in texts)
         if mentions_migrations or _glob_could_hit_state(texts):
             marker = writer.group(0).strip().split()[0]

@@ -2,7 +2,7 @@
 
 Preconditions: `state verify`; `state start-phase --phase provision`
 succeeds (this enforces Gate 1 approval; if it fails with a gate error,
-send the user to /db-drift:plan).
+send the user to /dbcarry:plan).
 
 1. Read migration.yaml (provider, dbname) and artifacts/inventory.json
    (roles). Read ${CLAUDE_PLUGIN_ROOT}/skills/provider-<provider>/SKILL.md.
@@ -12,7 +12,7 @@ send the user to /db-drift:plan).
 2. Execute the provider's Provision section. For local, the SQL steps
    run as:
    `python -c "import sys; sys.path.insert(0, r'<plugin>/scripts');
-   from db_drift import pg;
+   from db_carry import pg;
    pg.run_sql({'host':'127.0.0.1','port':55433,'dbname':'postgres',
    'user':'postgres','password_env':None}, 'CREATE DATABASE \"<dbname>\"')"`
    and likewise for each role DO-block from the provider skill.
@@ -28,7 +28,7 @@ send the user to /db-drift:plan).
 5. Write artifacts/03-provision.md: what was created, where, instance
    class, roles created, cost line from the provider skill, and the
    teardown command that undoes it.
-6. `state complete-phase --phase provision`. Next: /db-drift:migrate-schema.
+6. `state complete-phase --phase provision`. Next: /dbcarry:migrate-schema.
 
 ## Provider: bigquery
 
@@ -56,7 +56,7 @@ Live mode is NOT LIVE-TESTED.
 5. Write artifacts/target.json exactly in this shape:
    {"provider": "bigquery", "mode": "<mode>", "project": "<project>",
     "location": "<location>", "datasets": ["<each dataset>"],
-    "taxonomy": "dbdrift_<migration>"}
+    "taxonomy": "dbcarry_<migration>"}
    No host, port, user, or password_env. No bq-* verb reads
    target.json; it is the record rollback deletes from and status
    reports.
@@ -68,7 +68,7 @@ Live mode is NOT LIVE-TESTED.
    teardown commands that undo this phase (emulated:
    `python "$SCRIPTS" bq-backend reset --migration <name> --yes`; live:
    the skill's Teardown list).
-7. `state complete-phase --phase provision`. Next: /db-drift:migrate-schema.
+7. `state complete-phase --phase provision`. Next: /dbcarry:migrate-schema.
 
 On any provider command failure: `state fail-phase --phase provision
 --reason <r>`, report the raw error, and stop. Never retry resource

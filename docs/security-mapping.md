@@ -1,12 +1,12 @@
 # The PostgreSQL to BigQuery security mapping, for a reviewer
 
-This document explains what db-drift does with a PostgreSQL database's
+This document explains what dbcarry does with a PostgreSQL database's
 access controls when the target is BigQuery, in enough detail that a
 security reviewer can decide whether to trust it. The mapping is
 implemented once, as the pure function `plan_security` in
-`scripts/db_drift/bq_security.py`, and every rule here has a test in
+`scripts/db_carry/bq_security.py`, and every rule here has a test in
 `tests/test_bq_security.py`. The running example is the demo database
-that `/db-drift:demo setup` seeds, with the principal map filled in as the
+that `/dbcarry:demo setup` seeds, with the principal map filled in as the
 spec's example does (one Google Group per role). All numbers and names
 below come from running the pipeline against the demo's inventory
 fixtures in emulated mode; the artifacts a real run writes carry the same
@@ -37,7 +37,7 @@ privilege grants SELECT on future tables in `public` to `app_ro`.
 
 ## Inputs
 
-- `artifacts/security.json`, written by `python scripts/dbdrift.py
+- `artifacts/security.json`, written by `python scripts/dbcarry.py
   security inventory --host <h> --port <p> --dbname <d> --user <u>
   [--password-env <e>] --out artifacts/security.json`. Catalog queries
   only (`pg_roles`, `pg_auth_members`, `aclexplode` over `pg_namespace`,
@@ -188,11 +188,11 @@ In the demo the only restricted column is `customers.email`: `app_rw`
 reads every column, `app_ro` reads three, and `reporting` inherits
 `app_ro`'s three. The tag is `customers__email`, its reader is
 `group:retail-app-rw@example.com` (source role `app_rw`), and its
-description is "db-drift: public.customers.email readable by app_rw".
+description is "dbcarry: public.customers.email readable by app_rw".
 
 Mechanics that matter to a reviewer:
 
-- The tag lives in a taxonomy named `dbdrift_<migration>` created with
+- The tag lives in a taxonomy named `dbcarry_<migration>` created with
   `activatedPolicyTypes: ["FINE_GRAINED_ACCESS_CONTROL"]`. That activation
   is what makes the tag enforced; a taxonomy created without it only labels
   columns. `bq-security verify` has a dedicated check,

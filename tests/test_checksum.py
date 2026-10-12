@@ -1,4 +1,4 @@
-from db_drift.checksum import diff_snapshots
+from db_carry.checksum import diff_snapshots
 
 LEFT = {
     "tables": {

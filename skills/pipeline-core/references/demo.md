@@ -3,7 +3,7 @@
 Subcommands: `setup` and `teardown`. `$ARGUMENTS` selects one; default is
 `setup`.
 
-Set `$SCRIPTS` to `${CLAUDE_PLUGIN_ROOT}/scripts/dbdrift.py`. All commands
+Set `$SCRIPTS` to `${CLAUDE_PLUGIN_ROOT}/scripts/dbcarry.py`. All commands
 run via the shell tool from the user's project directory.
 
 ## setup
@@ -18,11 +18,11 @@ run via the shell tool from the user's project directory.
 4. `python "$SCRIPTS" seed --port 55432 --dbname retail`
 5. Report the seeded counts table, then print next steps for the user:
    two suggested init invocations, BigQuery first:
-   `/db-drift:init demo-bq` with source host 127.0.0.1, port 55432,
+   `/dbcarry:init demo-bq` with source host 127.0.0.1, port 55432,
    dbname retail, user postgres, no password env var (trust auth,
    localhost demo only), provider bigquery, mode emulated, downtime
    tolerance flexible (the path docs/HANDOFF.md walks through); or
-   `/db-drift:init demo-run` with the same source, provider local,
+   `/dbcarry:init demo-run` with the same source, provider local,
    downtime tolerance low (the PostgreSQL to PostgreSQL path).
 
 ## teardown

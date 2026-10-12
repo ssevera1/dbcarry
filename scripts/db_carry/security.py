@@ -26,7 +26,7 @@ unsynced_target_roles and do not affect the match.
 Postgres target (pg_dump does not carry role attributes). It never emits
 SUPERUSER and never sets passwords; the operator does that out of band.
 Role and group names are quoted identifiers inside DO blocks tagged
-$dbdrift$; a name containing that tag is refused rather than let it end
+$dbcarry$; a name containing that tag is refused rather than let it end
 the block early.
 
 Cloud targets: every query uses pg_roles and aclexplode/acldefault, which
@@ -36,7 +36,7 @@ import argparse
 import json
 import sys
 
-from db_drift import pg
+from db_carry import pg
 
 SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema', 'pg_toast')"
 
@@ -51,7 +51,7 @@ LIST_SEP = "\x1f"
 # Dollar-quote tag for the DO blocks sync-roles emits. Quoting an
 # identifier does not protect against a name that contains the tag
 # itself, so sync_roles_sql refuses such names.
-DOLLAR_TAG = "$dbdrift$"
+DOLLAR_TAG = "$dbcarry$"
 
 # PostgreSQL 16 added per-membership INHERIT and SET options
 # (pg_auth_members.inherit_option and set_option).
@@ -487,7 +487,7 @@ def _summary(inv):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py security")
+    parser = argparse.ArgumentParser(prog="dbcarry.py security")
     sub = parser.add_subparsers(dest="verb", required=True)
 
     p = sub.add_parser("inventory", help="read-only security inventory")

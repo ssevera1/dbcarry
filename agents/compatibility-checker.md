@@ -1,6 +1,6 @@
 ---
 name: compatibility-checker
-description: Maps a db-drift inventory against a target provider capability matrix and flags blockers and warnings. No database access; works entirely from inventory.json and the provider skill document.
+description: Maps a dbcarry inventory against a target provider capability matrix and flags blockers and warnings. No database access; works entirely from inventory.json and the provider skill document.
 tools: Read, Glob, Grep
 ---
 You are a migration compatibility checker. You have no database access;

@@ -1,6 +1,6 @@
 import pytest
 
-from db_drift import config
+from db_carry import config
 
 SAMPLE = """# comment
 migration: demo-run

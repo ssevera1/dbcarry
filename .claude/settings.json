@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python scripts/dbdrift.py:*)",
+      "Bash(python scripts/dbcarry.py:*)",
       "Bash(python -m pytest:*)",
       "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
       "Bash(bq show:*)", "Bash(bq ls:*)", "Bash(bq get-iam-policy:*)",

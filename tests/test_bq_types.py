@@ -1,6 +1,6 @@
 import pytest
 
-from db_drift import bq_types as t
+from db_carry import bq_types as t
 
 
 def col(data_type, udt, **kw):

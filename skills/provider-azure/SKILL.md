@@ -1,6 +1,6 @@
 ---
 name: provider-azure
-description: Azure Database for PostgreSQL Flexible Server target provider for db-drift
+description: Azure Database for PostgreSQL Flexible Server target provider for dbcarry
 ---
 
 # Provider: Azure Database for PostgreSQL Flexible Server
@@ -30,34 +30,34 @@ provision phase if any check fails.
 
 ## Provision
 
-Server name: `dbdrift-<migration>` (globally unique; append a random
+Server name: `dbcarry-<migration>` (globally unique; append a random
 suffix on collision). Admin password from a user-named env var.
 
-1. `az postgres flexible-server create --name dbdrift-<migration>
+1. `az postgres flexible-server create --name dbcarry-<migration>
    --resource-group <rg> --location <location> --tier Burstable
    --sku-name Standard_B1ms --storage-size 32 --version 17
-   --admin-user dbdrift --admin-password "$env:<PASSWORD_ENV>"
+   --admin-user dbcarry --admin-password "$env:<PASSWORD_ENV>"
    --public-access <operator public IP>` (minutes; long timeout or
    background)
 2. Allow needed extensions before schema restore:
    `az postgres flexible-server parameter set --server-name
-   dbdrift-<migration> --resource-group <rg> --name azure.extensions
+   dbcarry-<migration> --resource-group <rg> --name azure.extensions
    --value HSTORE` (comma-append every extension from inventory that
    the matrix allows)
 3. `az postgres flexible-server db create --server-name
-   dbdrift-<migration> --resource-group <rg> --database-name <dbname>`
+   dbcarry-<migration> --resource-group <rg> --database-name <dbname>`
 4. Pre-create inventory roles via psql once connected.
-5. Endpoint host is `dbdrift-<migration>.postgres.database.azure.com`
+5. Endpoint host is `dbcarry-<migration>.postgres.database.azure.com`
    -> target.json.
 
 ## Connect
 
-Endpoint host, port 5432, user dbdrift, TLS required
+Endpoint host, port 5432, user dbcarry, TLS required
 (PGSSLMODE=require), password_env as named by the user.
 
 ## Teardown
 
-`az postgres flexible-server delete --name dbdrift-<migration>
+`az postgres flexible-server delete --name dbcarry-<migration>
 --resource-group <rg> --yes` after typed confirmation of the
 migration name. Permanent.
 
@@ -82,6 +82,6 @@ not in scope for v0.1.0).
 ## MySQL flavor (engine mysql; execution deferred in v1)
 
 Azure Database for MySQL Flexible Server exists with the same
-provisioning shape (az mysql flexible-server create). db-drift v1 can
+provisioning shape (az mysql flexible-server create). dbcarry v1 can
 assess and plan against it but does not execute; say so if
 migration.yaml names engine mysql.

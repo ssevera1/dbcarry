@@ -1,6 +1,6 @@
 ---
 name: provider-gcp
-description: GCP Cloud SQL for PostgreSQL target provider for db-drift
+description: GCP Cloud SQL for PostgreSQL target provider for dbcarry
 ---
 
 # Provider: GCP Cloud SQL for PostgreSQL
@@ -31,25 +31,25 @@ enabled. Fail the provision phase if any check fails.
 
 ## Provision
 
-Instance id: `dbdrift-<migration>`. Region: ask the user. Password for
+Instance id: `dbcarry-<migration>`. Region: ask the user. Password for
 the postgres user comes from an env var the user names; pass it with
 `--root-password` via shell env expansion, never pasted into the
 command text in chat.
 
-1. `gcloud sql instances create dbdrift-<migration>
+1. `gcloud sql instances create dbcarry-<migration>
    --database-version=POSTGRES_17 --edition=enterprise
    --tier=db-g1-small --storage-size=10 --region=<region>
    --authorized-networks=<operator public IP>/32
    --root-password="$env:<PASSWORD_ENV>"`
    (takes minutes; use a long timeout or background execution)
 2. `gcloud sql databases create <dbname>
-   --instance=dbdrift-<migration>`
+   --instance=dbcarry-<migration>`
 3. Pre-create inventory roles: for login roles,
-   `gcloud sql users create <role> --instance=dbdrift-<migration>
+   `gcloud sql users create <role> --instance=dbcarry-<migration>
    --password="$env:<ROLE_PASSWORD_ENV>"` (one operator-supplied env
    var per role); NOLOGIN roles via psql `CREATE ROLE <role> NOLOGIN`
    once connected.
-4. Endpoint: `gcloud sql instances describe dbdrift-<migration>
+4. Endpoint: `gcloud sql instances describe dbcarry-<migration>
    --format="value(ipAddresses[0].ipAddress)"` -> target.json host,
    port 5432, instance id as `instance`.
 
@@ -61,7 +61,7 @@ user-named env var.
 
 ## Teardown
 
-`gcloud sql instances delete dbdrift-<migration>` after typed
+`gcloud sql instances delete dbcarry-<migration>` after typed
 confirmation of the migration name. This deletes the instance and its
 data permanently.
 
@@ -84,5 +84,5 @@ v0.1.0).
 ## MySQL flavor (engine mysql; execution deferred in v1)
 
 Cloud SQL for MySQL exists with the same provisioning shape
-(--database-version=MYSQL_8_4). db-drift v1 can assess and plan against
+(--database-version=MYSQL_8_4). dbcarry v1 can assess and plan against
 it but does not execute; say so if migration.yaml names engine mysql.

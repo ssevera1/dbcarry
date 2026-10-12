@@ -1,4 +1,4 @@
-from db_drift import pg
+from db_carry import pg
 
 CI = {"host": "127.0.0.1", "port": 5432, "dbname": "demo", "user": "postgres",
       "password_env": None}

@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 
-from db_drift import pg
+from db_carry import pg
 
 SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema')"
 
@@ -183,7 +183,7 @@ def build_inventory(raw):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py inventory")
+    parser = argparse.ArgumentParser(prog="dbcarry.py inventory")
     pg.add_conn_args(parser)
     parser.add_argument("--out", default=None)
     parser.add_argument("--exact", action="store_true",

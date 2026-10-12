@@ -1,6 +1,6 @@
 ---
 name: provider-aws
-description: AWS RDS for PostgreSQL target provider for db-drift
+description: AWS RDS for PostgreSQL target provider for dbcarry
 ---
 
 # Provider: AWS RDS for PostgreSQL
@@ -29,39 +29,39 @@ security groups. Fail the provision phase if any check fails.
 
 ## Provision
 
-Instance id: `dbdrift-<migration>`. Master password from a user-named
+Instance id: `dbcarry-<migration>`. Master password from a user-named
 env var, expanded by the shell, never echoed.
 
 1. Security group allowing inbound 5432 from the operator IP:
-   `aws ec2 create-security-group --group-name dbdrift-<migration>
-   --description "db-drift migration target"` then
+   `aws ec2 create-security-group --group-name dbcarry-<migration>
+   --description "dbcarry migration target"` then
    `aws ec2 authorize-security-group-ingress --group-name
-   dbdrift-<migration> --protocol tcp --port 5432
+   dbcarry-<migration> --protocol tcp --port 5432
    --cidr <operator public IP>/32`
 2. `aws rds create-db-instance
-   --db-instance-identifier dbdrift-<migration> --engine postgres
+   --db-instance-identifier dbcarry-<migration> --engine postgres
    --engine-version 17 --db-instance-class db.t4g.micro
-   --allocated-storage 20 --master-username dbdrift
+   --allocated-storage 20 --master-username dbcarry
    --master-user-password "$env:<PASSWORD_ENV>"
    --publicly-accessible --vpc-security-group-ids <sg id>`
 3. `aws rds wait db-instance-available
-   --db-instance-identifier dbdrift-<migration>` (minutes; long
+   --db-instance-identifier dbcarry-<migration>` (minutes; long
    timeout or background)
 4. Endpoint: `aws rds describe-db-instances --db-instance-identifier
-   dbdrift-<migration> --query
+   dbcarry-<migration> --query
    "DBInstances[0].Endpoint.Address" --output text` -> target.json.
 5. Create the database and pre-create inventory roles via psql once
    connected (CREATE DATABASE, CREATE ROLE).
 
 ## Connect
 
-Endpoint host, port 5432, user dbdrift, TLS required
+Endpoint host, port 5432, user dbcarry, TLS required
 (PGSSLMODE=require), password_env as named by the user.
 
 ## Teardown
 
 `aws rds delete-db-instance --db-instance-identifier
-dbdrift-<migration> --skip-final-snapshot` plus deleting the security
+dbcarry-<migration> --skip-final-snapshot` plus deleting the security
 group, after typed confirmation of the migration name. Permanent.
 
 ## Cost
@@ -83,6 +83,6 @@ v0.1.0).
 ## MySQL flavor (engine mysql; execution deferred in v1)
 
 RDS for MySQL exists with the same provisioning shape
-(--engine mysql --engine-version 8.4). db-drift v1 can assess and plan
+(--engine mysql --engine-version 8.4). dbcarry v1 can assess and plan
 against it but does not execute; say so if migration.yaml names engine
 mysql.

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from db_drift import bq_backend as bb
-from db_drift import bq_validate as v
-from db_drift import pg
+from db_carry import bq_backend as bb
+from db_carry import bq_validate as v
+from db_carry import pg
 
 
 def col(name, data_type, udt, ordinal, **kw):

@@ -1,7 +1,7 @@
 # Mapping rules
 
 Spec sections 7.1 to 7.5 as rule tables, restated from
-`scripts/db_drift/bq_security.py`. Each rule names the finding code the
+`scripts/db_carry/bq_security.py`. Each rule names the finding code the
 planner emits, exactly as the code spells it. The full code list with
 severities is at the end; it is the complete set the module can emit.
 The live command forms in 7.5 are NOT LIVE-TESTED.
@@ -79,7 +79,7 @@ authorized view).
 | Allowed readers | the readers of the table that can read the column; a mapped superuser is added to every tag's readers |
 | Grouping | restricted columns of one table with identical allowed-reader sets share one tag, in inventory column order |
 | Tag name | `<bq table name>__<first column>` plus `_and_<k>_more` for `k` further columns, sanitized to `[A-Za-z0-9_]`; on a collision across tables the dataset name is prefixed |
-| Taxonomy | one per migration, display name `dbdrift_<migration>`, `activatedPolicyTypes: ["FINE_GRAINED_ACCESS_CONTROL"]`. Without that activation a tag only labels the column; verify checks it (`taxonomy_enforcement`) |
+| Taxonomy | one per migration, display name `dbcarry_<migration>`, `activatedPolicyTypes: ["FINE_GRAINED_ACCESS_CONTROL"]`. Without that activation a tag only labels the column; verify checks it (`taxonomy_enforcement`) |
 | Reader role | `roles/datacatalog.categoryFineGrainedReader` on the tag for each allowed reader's principal |
 | Attachment | the tag's resource name in the column's `policyTags.names` of the table schema, applied after the tables exist |
 | Unmapped reader | recorded in the role's `unmapped_role` message as "fine-grained reader on tag <name>" |

@@ -1,4 +1,4 @@
-# Contributing to db-drift
+# Contributing to dbcarry
 
 ## Dev setup
 
@@ -6,9 +6,9 @@
   also work). The runtime has no third-party dependencies: every script
   under `scripts/` is standard library only, and that stays true.
 - pytest is the only dev dependency: `python -m pip install pytest`.
-- For live PostgreSQL checks, `python scripts/dbdrift.py pg ensure-tools`
-  downloads a portable PostgreSQL 17 toolchain under `~/.db-drift/pg/`
-  (override the location with `DBDRIFT_HOME`). The unit suite does not
+- For live PostgreSQL checks, `python scripts/dbcarry.py pg ensure-tools`
+  downloads a portable PostgreSQL 17 toolchain under `~/.dbcarry/pg/`
+  (override the location with `DBCARRY_HOME`). The unit suite does not
   need it.
 - For development inside Claude Code, open the repository with
   `claude --plugin-dir .` so the commands, agents, and skills load from
@@ -47,7 +47,7 @@ extend the contract instead.
 A mapping rule (how a PostgreSQL privilege, policy, or role attribute
 becomes a BigQuery control) lives in three places and has a test:
 
-1. Code: `scripts/db_drift/bq_security.py` (`plan_security` and its
+1. Code: `scripts/db_carry/bq_security.py` (`plan_security` and its
    helpers). The rule emits plan entries and findings, and it never widens
    access beyond the source privilege it maps.
 2. Rulebook: `skills/security-mapping/references/mapping-rules.md`, which
@@ -59,7 +59,7 @@ becomes a BigQuery control) lives in three places and has a test:
    read-back.
 
 If the rule needs a new planted finding, add it to
-`scripts/db_drift/seed_demo.py` and to the table in `demo/scenario.md` so
+`scripts/db_carry/seed_demo.py` and to the table in `demo/scenario.md` so
 the emulated demo exercises it.
 
 ## Commit messages
@@ -87,7 +87,7 @@ literals, fixtures, data files, or quoted material.
 ## State is never hand-edited
 
 `migrations/<name>/state.json` is written only by
-`python scripts/dbdrift.py state --migration <name> <verb>`, which
+`python scripts/dbcarry.py state --migration <name> <verb>`, which
 validates each transition against the phase and gate table and appends to
 `artifacts/decision-log.md`. Editing it by hand desynchronizes the log from
 what ran and lets a gate be skipped.
@@ -120,7 +120,7 @@ command whose words include a deleter, mover, copier, or writer (`rm`,
 their aliases, `Out-File`, `Export-*`, `[IO.File]::`) together with a
 `migrations` path segment or a bare glob that could match `state.json`.
 `rm -rf sandbox/release` and a glob under a literal non-migrations
-directory pass, and a single unpiped `python .../dbdrift.py <verb>` call
+directory pass, and a single unpiped `python .../dbcarry.py <verb>` call
 is exempt so a `--reason` text may name a path. A shell heredoc whose
 prose mentions `state.json` is refused; write such a report with the
 Write tool. Bad or unexpected input allows the call (exit 0) so the hook

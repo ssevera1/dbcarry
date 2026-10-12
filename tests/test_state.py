@@ -1,6 +1,6 @@
 import pytest
 
-from db_drift import state as sm
+from db_carry import state as sm
 
 
 def fresh():

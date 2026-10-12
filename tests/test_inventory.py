@@ -1,4 +1,4 @@
-from db_drift.inventory import build_inventory, quote_ident
+from db_carry.inventory import build_inventory, quote_ident
 
 RAW = {
     "server": [["17.5", "replica", "UTF8"]],

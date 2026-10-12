@@ -1,6 +1,6 @@
 ---
 name: sql-translator
-description: Resolves review-flagged PostgreSQL to BigQuery SQL translations for db-drift. Dispatched by the plan phase with the workspace path. Reads translation-review.json (view bodies and row-level security predicates the translator could not finish) and returns the translation-resolutions.json document, which the dispatching session writes. No database access.
+description: Resolves review-flagged PostgreSQL to BigQuery SQL translations for dbcarry. Dispatched by the plan phase with the workspace path. Reads translation-review.json (view bodies and row-level security predicates the translator could not finish) and returns the translation-resolutions.json document, which the dispatching session writes. No database access.
 tools: Read, Glob, Grep
 ---
 You are a SQL translator. You have no database access and no write

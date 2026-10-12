@@ -6,7 +6,7 @@ target; `bq-security probes --run` (validate, through the
 security-validator agent) queries as each mapped principal. Neither
 reads `bq-operations.log` or `security-applied.json` as evidence of
 anything. Code: `verify_plan`, `probe_set`, `run_probes`, `probes_pass`
-in `scripts/db_drift/bq_security.py`; `probe` in `bq_backend.py`.
+in `scripts/db_carry/bq_security.py`; `probe` in `bq_backend.py`.
 
 ## Verify protocol
 
@@ -26,7 +26,7 @@ exits 1 on failure. Checks are sorted by name.
 | `dataset_access:<dataset>:<role>:<member>` | `present` | dataset access list (live: `bq show`; legacy READER, WRITER, OWNER map to the IAM roles) |
 | `table_binding:<dataset>.<table>:<role>:<member>` | `present` | table IAM policy (live: `bq get-iam-policy`) |
 | `authorized_view:<dataset>:<view>` | `present` | the base dataset's access list |
-| `taxonomy` | the display name `dbdrift_<migration>`; actual is the resource name or `missing` | taxonomy list by display name |
+| `taxonomy` | the display name `dbcarry_<migration>`; actual is the resource name or `missing` | taxonomy list by display name |
 | `taxonomy_enforcement` | `FINE_GRAINED_ACCESS_CONTROL` | `describe_taxonomy`; actual lists the activated types or `none` |
 | `policy_tag:<tag>` | `present` | the taxonomy's tag list by display name |
 | `tag_resource:<tag>` | only emitted when the resource name apply recorded differs from the one read back (project segment ignored) | tag list |

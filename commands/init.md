@@ -1,8 +1,8 @@
 ---
-description: Create a db-drift migration workspace
+description: Create a dbcarry migration workspace
 argument-hint: "<migration-name>"
 ---
-You are running the db-drift init phase.
+You are running the dbcarry init phase.
 
 1. Read ${CLAUDE_PLUGIN_ROOT}/skills/pipeline-core/SKILL.md and follow
    its hard rules.

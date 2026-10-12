@@ -3,7 +3,7 @@
 How PostgreSQL column privileges become enforced BigQuery column-level
 security, and what that costs in behavior. Code: `build_tags`,
 `build_masking`, `apply_plan`, and `verify_plan` in
-`scripts/db_drift/bq_security.py`; `EmulatedBackend` and `LiveBackend`
+`scripts/db_carry/bq_security.py`; `EmulatedBackend` and `LiveBackend`
 in `bq_backend.py`. Live mechanics are NOT LIVE-TESTED.
 
 ## Activation is what enforces
@@ -11,7 +11,7 @@ in `bq_backend.py`. Live mechanics are NOT LIVE-TESTED.
 A Data Catalog taxonomy created without `activatedPolicyTypes:
 ["FINE_GRAINED_ACCESS_CONTROL"]` only labels columns; every principal
 with table read keeps reading them. The plan creates
-`dbdrift_<migration>` with that activation, `apply_plan` reuses an
+`dbcarry_<migration>` with that activation, `apply_plan` reuses an
 existing taxonomy of that display name, and `verify_plan` reads the
 taxonomy back and reports `taxonomy_enforcement` (expected
 `FINE_GRAINED_ACCESS_CONTROL`) plus the top-level `enforcement_active`
@@ -90,7 +90,7 @@ policy request body: `dataPolicyId` `mask_<tag>`, type
 the table but not the column. `bq-security plan` writes them to
 `artifacts/bq-apply/60-masking-requests.json` for
 `bigquerydatapolicy.googleapis.com` `dataPolicies.create`, with the
-policy tag resource name to be filled in after apply. db-drift does not
+policy tag resource name to be filled in after apply. dbcarry does not
 execute them: there is no CLI surface for data policies, and verify
 does not read them back.
 

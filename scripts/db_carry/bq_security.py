@@ -33,7 +33,7 @@ import re
 import sys
 from pathlib import Path
 
-from db_drift import bq_backend, bq_predicate, bq_types, config, pg
+from db_carry import bq_backend, bq_predicate, bq_types, config, pg
 
 ROLE_VIEWER = "roles/bigquery.dataViewer"
 ROLE_EDITOR = "roles/bigquery.dataEditor"
@@ -294,7 +294,7 @@ def _require_columns(inventory):
     if "columns" not in (inventory or {}):
         raise SecurityPlanError(
             "inventory.json has no columns section, so column privileges "
-            "cannot be mapped; re-run the assess phase with db-drift v0.2.0 "
+            "cannot be mapped; re-run the assess phase with dbcarry v0.2.0 "
             "(inventory --out artifacts/inventory.json) and plan again")
 
 
@@ -946,7 +946,7 @@ class _Planner:
                     "WARNING", "public_unmapped", "PUBLIC",
                     f"PUBLIC holds grants on {', '.join(rels)}; every source "
                     "role received them through folding, but no BigQuery "
-                    "principal stands for PUBLIC itself (db-drift never maps "
+                    "principal stands for PUBLIC itself (dbcarry never maps "
                     "it to allUsers or allAuthenticatedUsers)",
                     "set bigquery.public_principal to a group holding every "
                     "user, or accept that only inventoried roles keep access")
@@ -1086,7 +1086,7 @@ class _Planner:
                                 for c in cols],
                     "readers": readers,
                     "source_columns": source_columns,
-                    "description": f"db-drift: {', '.join(source_columns)} "
+                    "description": f"dbcarry: {', '.join(source_columns)} "
                                    f"readable by {who}"})
         tags.sort(key=lambda t: t["name"])
         return tags
@@ -1580,7 +1580,7 @@ class _Planner:
                 "column privileges cannot be analyzed and its probes select "
                 "no columns",
                 "re-run the assess phase (inventory --out "
-                "artifacts/inventory.json) with db-drift v0.2.0 and plan "
+                "artifacts/inventory.json) with dbcarry v0.2.0 and plan "
                 "again")
 
     def nesting_notes(self):
@@ -1644,7 +1644,7 @@ class _Planner:
             "project": self.project,
             "location": self.location,
             "mode": self.mode,
-            "taxonomy": {"display_name": f"dbdrift_{self.migration}",
+            "taxonomy": {"display_name": f"dbcarry_{self.migration}",
                          "activated": [FGAC]},
             "datasets": dict(sorted(self.datasets.items())),
             "principals": dict(sorted(self.principals.items())),
@@ -1727,7 +1727,7 @@ def render_apply_scripts(plan, bq_cfg):
     dc_location = location.lower()
     migration = plan.get("migration") or bq_cfg.get("migration")
     head = ["#!/usr/bin/env bash",
-            f"# db-drift security plan for migration {migration} "
+            f"# dbcarry security plan for migration {migration} "
             f"(project {project}, {plan.get('mode')} mode)",
             "# Rendered from artifacts/security-plan.json for review. "
             "bq-security apply runs",
@@ -1833,7 +1833,7 @@ def render_apply_scripts(plan, bq_cfg):
         tags.append("# no restricted columns: no policy tags are planned")
     out["40-policy-tags.sh"] = "\n".join(tags) + "\n"
 
-    sql = [f"-- db-drift row access policies for migration {migration} "
+    sql = [f"-- dbcarry row access policies for migration {migration} "
            f"(project {project})",
            "-- Rendered from artifacts/security-plan.json. Policies marked "
            "REVIEW are commented out:",
@@ -1874,7 +1874,7 @@ def render_apply_scripts(plan, bq_cfg):
                 "bindings": [{"role": ROLE_MASKED_READER,
                               "members": list(m["masked_readers"])}],
                 "note": "request body for bigquerydatapolicy.googleapis.com "
-                        "dataPolicies.create; db-drift writes it and does "
+                        "dataPolicies.create; dbcarry writes it and does "
                         "not execute it (no CLI surface)"})
         out["60-masking-requests.json"] = json.dumps(docs, indent=2) + "\n"
 
@@ -2980,7 +2980,7 @@ def _cmd_probes(args, mig, bq_cfg, ws):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py bq-security")
+    parser = argparse.ArgumentParser(prog="dbcarry.py bq-security")
     parser.add_argument("--root", default=".",
                         help="project root holding migrations/")
     parser.add_argument("--migration", default=None)

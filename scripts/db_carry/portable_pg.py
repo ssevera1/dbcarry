@@ -1,7 +1,7 @@
 """Portable PostgreSQL bootstrap and local instance lifecycle.
 
 Downloads the pinned EDB binaries zip on Windows when no tools are on
-PATH. Instances are plain data directories under ~/.db-drift/instances,
+PATH. Instances are plain data directories under ~/.dbcarry/instances,
 listening on 127.0.0.1 only, auth=trust (local demo instances hold only
 generated demo data). initdb and pg_ctl self-drop admin privileges on
 Windows via restricted tokens.
@@ -17,7 +17,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from db_drift import pg
+from db_carry import pg
 
 PG_VERSION = "17.5-1"
 PG_URL = ("https://get.enterprisedb.com/postgresql/"
@@ -103,7 +103,7 @@ def create(name, port, wal_level):
         _run([pg.find_bin("initdb"), "-D", str(data), "-U", "postgres",
               "-A", "trust", "-E", "UTF8", "--locale=C"])
         with (data / "postgresql.conf").open("a", encoding="utf-8") as fh:
-            fh.write(f"\n# db-drift\nport = {port}\n"
+            fh.write(f"\n# dbcarry\nport = {port}\n"
                      "listen_addresses = '127.0.0.1'\n"
                      f"wal_level = {wal_level}\n")
         (inst / "meta.json").write_text(
@@ -202,7 +202,7 @@ def list_instances():
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py pg")
+    parser = argparse.ArgumentParser(prog="dbcarry.py pg")
     sub = parser.add_subparsers(dest="verb", required=True)
     sub.add_parser("ensure-tools")
     p = sub.add_parser("create")

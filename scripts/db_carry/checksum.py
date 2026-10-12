@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 
-from db_drift import inventory, pg
+from db_carry import inventory, pg
 
 SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema')"
 TABLES_SQL = (
@@ -57,7 +57,7 @@ def diff_snapshots(left, right, ignore_sequences=False):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py checksum")
+    parser = argparse.ArgumentParser(prog="dbcarry.py checksum")
     sub = parser.add_subparsers(dest="verb", required=True)
     p = sub.add_parser("snapshot")
     pg.add_conn_args(p)

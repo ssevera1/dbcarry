@@ -119,7 +119,7 @@ phase is genuinely done; report that and move on to provision.
 
    ## Source-side changes requiring approval
    <exact list, or "None". For logical_replication always include:
-   publication <dbdrift_pub> FOR ALL TABLES, one replication slot.
+   publication <dbcarry_pub> FOR ALL TABLES, one replication slot.
    Add wal_level change when needed. bulk_load: "None" (the export is
    read-only); the demo-mode quiesce at cutover is hard rule 2's
    standing exception.>
@@ -129,7 +129,7 @@ phase is genuinely done; report that and move on to provision.
    enable, roles to pre-create (from inventory), estimated cost line
    from provider skill. bigquery: project, location, datasets with
    their source schemas (schema-plan.json datasets), the taxonomy
-   dbdrift_<migration>, instance class "on-demand (serverless)", the
+   dbcarry_<migration>, instance class "on-demand (serverless)", the
    cost line, and for mode live the NOT LIVE-TESTED statement from
    step 6>
 

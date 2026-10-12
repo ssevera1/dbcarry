@@ -27,9 +27,9 @@ succeeds.
    (05-data-report.md, "Security parity"), after the pre-data sections
    passed in 04b-security-report.md. Quote that verdict in the validate
    summary; if 05-data-report.md lacks the section, stop and send the
-   user back to /db-drift:migrate-data.
+   user back to /dbcarry:migrate-data.
 4. Read artifacts/06-validation.md. Verdict VALIDATION PASSED ->
-   `state complete-phase --phase validate`; next /db-drift:cutover.
+   `state complete-phase --phase validate`; next /dbcarry:cutover.
    VALIDATION FAILED -> `state fail-phase --phase validate --reason
    <first failing check>`; tell the user which earlier phase to re-run
    (checksum mismatch: migrate-data; count mismatch: migrate-schema)
@@ -84,7 +84,7 @@ says "(emulated)". Live mode is NOT LIVE-TESTED.
    artifacts/06b-security-validation.md with the verdict line
    SECURITY VALIDATION PASSED or SECURITY VALIDATION FAILED.
 4. Read both reports. VALIDATION PASSED and SECURITY VALIDATION PASSED
-   -> `state complete-phase --phase validate`; next /db-drift:cutover.
+   -> `state complete-phase --phase validate`; next /dbcarry:cutover.
    Either FAILED -> `state fail-phase --phase validate --reason <first
    failing check>`; tell the user which earlier phase the failure
    points at (a fingerprint mismatch or a load count: migrate-data;

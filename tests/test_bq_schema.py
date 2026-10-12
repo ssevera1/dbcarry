@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from db_drift import bq_backend as bb
-from db_drift import bq_schema as bs
-from db_drift import pg
+from db_carry import bq_backend as bb
+from db_carry import bq_schema as bs
+from db_carry import pg
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -28,7 +28,7 @@ ORDERS_DDL = """CREATE TABLE IF NOT EXISTS `proj.retail.orders` (
   FOREIGN KEY (customer_id) REFERENCES `proj.retail.customers` (id) NOT ENFORCED
 )
 CLUSTER BY id
-OPTIONS (description = 'migrated from public.orders by db-drift');"""
+OPTIONS (description = 'migrated from public.orders by dbcarry');"""
 
 RECENT_ORDERS_SQL = (
     "SELECT o.id, c.email, o.status, o.ordered_at FROM (`proj.retail.orders` "
@@ -159,7 +159,7 @@ def test_demo_plan_covers_every_table_and_view():
     assert "CLUSTER BY" not in audit["ddl"]
     assert audit["ddl"].endswith(
         ")\nOPTIONS (description = 'migrated from public.audit_log by "
-        "db-drift');")
+        "dbcarry');")
 
     views = by_name(plan, "views")
     assert set(views) == {"public.recent_orders", "public.sales_by_product"}
@@ -1165,10 +1165,10 @@ def test_description_escapes_quotes_and_backslashes(emu):
     plan = bs.translate_schema(inv, BQ_CFG)
     tables = by_name(plan)
     assert tables["public.o'neil"]["ddl"].endswith(
-        "OPTIONS (description = 'migrated from public.o\\'neil by db-drift');")
+        "OPTIONS (description = 'migrated from public.o\\'neil by dbcarry');")
     assert tables["public.back\\slash"]["ddl"].endswith(
         "OPTIONS (description = 'migrated from public.back\\\\slash by "
-        "db-drift');")
+        "dbcarry');")
     bs.apply_schema(plan, emu)
     assert bs.verify_schema(plan, emu)["pass"] is True
 

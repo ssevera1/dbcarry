@@ -8,7 +8,7 @@ quiesce, publication, replication slot).
 2. Confirm with the user: list exactly what will be destroyed (target
    instance/resource from target.json; bigquery: the datasets and the
    taxonomy named there) and what will be reverted on the source (only
-   items the pipeline created: publication dbdrift_pub, its slot, the
+   items the pipeline created: publication dbcarry_pub, its slot, the
    read-only setting if cutover set it). Require the user to TYPE the
    migration name (AskUserQuestion free text via Other, or ask in
    chat). A click is not enough. Abort on any other input.
@@ -18,10 +18,10 @@ quiesce, publication, replication slot).
 3. Revert source-side pipeline artifacts, in this order:
    a. If a subscription exists on the target:
       `python "$SCRIPTS" replicate drop-subscription <target flags>
-      --name dbdrift_sub`
+      --name dbcarry_sub`
    b. If publication exists on the source:
       `python "$SCRIPTS" replicate drop-publication <source flags>
-      --name dbdrift_pub`
+      --name dbcarry_pub`
    c. If cutover had quiesced: SQL on source
       `ALTER DATABASE "<db>" RESET default_transaction_read_only`.
 4. Tear down the target per the provider skill's Teardown section.
@@ -36,13 +36,13 @@ quiesce, publication, replication slot).
    section of ${CLAUDE_PLUGIN_ROOT}/skills/provider-bigquery/SKILL.md:
    - every dataset named under datasets in target.json (tables, views,
      row access policies, and the tag attachments go with them);
-   - the taxonomy dbdrift_<migration>, by the full resource name
+   - the taxonomy dbcarry_<migration>, by the full resource name
      recorded under taxonomy in artifacts/security-applied.json (when
      that file is missing, migrate_security never ran and there is no
      taxonomy), after the datasets: a tag still attached to a column
      blocks the delete.
    Emulated: `python "$SCRIPTS" bq-backend reset --migration <name>
-   --yes` removes ~/.db-drift/bq-emulated/<name>/ (datasets, taxonomy,
+   --yes` removes ~/.dbcarry/bq-emulated/<name>/ (datasets, taxonomy,
    loaded rows) in one step; without --yes it prints the path and exits
    2, and it refuses any path that is not a direct child of
    bq-emulated.
@@ -56,7 +56,7 @@ quiesce, publication, replication slot).
    command's output.
    Staging copies hold every row in plain text: delete
    <workspace>/artifacts/export/ and, in live mode with gcs_bucket set,
-   gs://<bucket>/db-drift/<name>/ (`gcloud storage rm -r`; NOT
+   gs://<bucket>/dbcarry/<name>/ (`gcloud storage rm -r`; NOT
    LIVE-TESTED).
 
 ## All providers

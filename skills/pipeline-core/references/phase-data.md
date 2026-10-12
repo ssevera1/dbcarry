@@ -33,7 +33,7 @@ complete). Read the strategy from `state show`.
    parity" section with the diff verdict and the per-section counts,
    and the verdict.
 8. Counts equal and diff match -> `state complete-phase --phase
-   migrate_data`; next /db-drift:validate. Otherwise `state fail-phase`
+   migrate_data`; next /dbcarry:validate. Otherwise `state fail-phase`
    with the difference.
 
 ## Strategy: logical_replication (providers local, gcp, aws, azure)
@@ -72,7 +72,7 @@ the report).
    objcounts, the "Security parity" section, a note that sequences
    intentionally lag until cutover, and that the subscription stays
    RUNNING until cutover finalizes it.
-9. `state complete-phase --phase migrate_data`; next /db-drift:validate.
+9. `state complete-phase --phase migrate_data`; next /dbcarry:validate.
 
 ## Strategy: bulk_load (provider bigquery)
 
@@ -91,7 +91,7 @@ LIVE-TESTED; emulated numbers are labeled emulated.
    as the target reports it (policy tags included), reads the row
    count back, and compares it with the export line count. Live mode
    with gcs_bucket set stages the file through `gcloud storage cp` to
-   gs://<bucket>/db-drift/<name>/<dataset>/ first. Writes
+   gs://<bucket>/dbcarry/<name>/<dataset>/ first. Writes
    artifacts/load-report.json and prints one line per table plus the
    verdict; exit 1 when any table fails. Large sources run long: use
    background execution and poll. Both backends append, so a table
@@ -101,7 +101,7 @@ LIVE-TESTED; emulated numbers are labeled emulated.
    <schema.table>` for each table that did not load (keep every
    printed line; each run overwrites load-report.json). A table left
    with a partial load cannot be emptied by the pipeline: emulated,
-   the honest path is /db-drift:rollback and a fresh migration; live,
+   the honest path is /dbcarry:rollback and a fresh migration; live,
    the operator empties the table by hand before the per-table run.
    Operators who want no plain-text staging copies left behind add
    `--cleanup` to the run: each table's local and GCS copies are
@@ -123,5 +123,5 @@ LIVE-TESTED; emulated numbers are labeled emulated.
    them; the emulator never evaluates one) and that sequences do not
    exist on the target.
 4. Every table passes -> `state complete-phase --phase migrate_data`;
-   next /db-drift:validate. Otherwise `state fail-phase --phase
+   next /dbcarry:validate. Otherwise `state fail-phase --phase
    migrate_data --reason <first failing table and its reason>`.

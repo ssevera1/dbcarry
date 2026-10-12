@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from db_drift import pg
+from db_carry import pg
 
 SYSTEM_SCHEMAS = "('pg_catalog', 'information_schema')"
 
@@ -70,7 +70,7 @@ def do_objcount(ci):
 
 def main(argv):
     verb = argv[0]
-    parser = argparse.ArgumentParser(prog=f"dbdrift.py {verb}")
+    parser = argparse.ArgumentParser(prog=f"dbcarry.py {verb}")
     if verb == "dump":
         parser.add_argument("kind", choices=["schema", "data"])
         parser.add_argument("--out", required=True)

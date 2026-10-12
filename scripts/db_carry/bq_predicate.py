@@ -38,7 +38,7 @@ than starting over.
 """
 import re
 
-from db_drift import bq_types
+from db_carry import bq_types
 
 AUTO_FUNCTIONS = {
     "coalesce", "nullif", "lower", "upper", "length", "abs", "greatest",

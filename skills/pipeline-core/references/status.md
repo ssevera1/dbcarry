@@ -15,20 +15,20 @@ Read-only; touches nothing but state.json, migration.yaml, artifacts/.
    --migration <name>` may be quoted for the target's datasets, tables,
    row policies, and taxonomies; it is read-only.
 4. Name the exact next command:
-   first phase not complete maps assess->/db-drift:assess,
-   plan->/db-drift:plan, provision->/db-drift:provision,
-   migrate_schema->/db-drift:migrate-schema,
-   migrate_security->/db-drift:security,
-   migrate_data->/db-drift:migrate-data, validate->/db-drift:validate,
-   cutover->/db-drift:cutover. A gate blocking the next phase means the
+   first phase not complete maps assess->/dbcarry:assess,
+   plan->/dbcarry:plan, provision->/dbcarry:provision,
+   migrate_schema->/dbcarry:migrate-schema,
+   migrate_security->/dbcarry:security,
+   migrate_data->/dbcarry:migrate-data, validate->/dbcarry:validate,
+   cutover->/dbcarry:cutover. A gate blocking the next phase means the
    next step is re-running the phase command that owns the gate (plan or
    cutover). For cutover, gate 2 is checked before the phase starts, so
    re-running always re-presents it. For plan, the gate is checked after
    the phase completes: if plan already shows complete with
-   plan_approval unapproved, re-running /db-drift:plan hits its resume
+   plan_approval unapproved, re-running /dbcarry:plan hits its resume
    branch (start-phase fails because plan is done, so it checks the gate
    and re-presents it) rather than re-running the phase's other steps.
-   For bigquery, when the next command is /db-drift:plan and
+   For bigquery, when the next command is /dbcarry:plan and
    security/principal-map.yaml still has empty principals, say so: the
    plan phase will report those roles as unmapped.
    All phases complete: report done.

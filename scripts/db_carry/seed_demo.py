@@ -1,4 +1,4 @@
-"""Seed the deterministic db-drift demo dataset (RNG seed 42).
+"""Seed the deterministic dbcarry demo dataset (RNG seed 42).
 
 Data volumes are constants below; \\copy streams CSV from memory. After
 copying with explicit ids, sequences are advanced with setval so the
@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 
-from db_drift import pg
+from db_carry import pg
 
 SEED = 42
 N_CUSTOMERS = 100_000
@@ -164,7 +164,7 @@ def gen_audit(rng):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py seed")
+    parser = argparse.ArgumentParser(prog="dbcarry.py seed")
     pg.add_conn_args(parser)
     args = parser.parse_args(argv[1:])
     ci = pg.conn_from_args(args)

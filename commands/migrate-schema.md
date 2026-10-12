@@ -2,7 +2,7 @@
 description: Migrate the schema to the target (pre-data restore)
 argument-hint: "[migration-name]"
 ---
-You are running the db-drift migrate-schema phase.
+You are running the dbcarry migrate-schema phase.
 
 1. Read ${CLAUDE_PLUGIN_ROOT}/skills/pipeline-core/SKILL.md and follow
    its hard rules.

@@ -55,11 +55,11 @@ import threading
 import time
 from pathlib import Path
 
-from db_drift import bq_backend, bq_types, config, pg
+from db_carry import bq_backend, bq_types, config, pg
 
 COPY_OPTIONS = "WITH (FORMAT csv, QUOTE E'\\x01', DELIMITER E'\\x02')"
 EXPORT_TZ_OPTS = "-c TimeZone=UTC"
-GCS_PREFIX = "db-drift"
+GCS_PREFIX = "dbcarry"
 REPORT_NAME = "load-report.json"
 EXPORT_DIR = "export"
 SECURITY_VERIFY_NAME = "security-verify.json"
@@ -416,7 +416,7 @@ def security_verified(artifacts):
 
 def main(argv):
     tolerant_console()
-    parser = argparse.ArgumentParser(prog="dbdrift.py bq-load")
+    parser = argparse.ArgumentParser(prog="dbcarry.py bq-load")
     parser.add_argument("--root", default=".",
                         help="project root holding migrations/")
     parser.add_argument("--migration", default=None)

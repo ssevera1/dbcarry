@@ -1,4 +1,4 @@
-# db-drift
+# dbcarry
 
 > **This repository is an example, offered to foster ideas or to take and
 > adapt. It exists to show how a frontier AI model can carry work that has
@@ -11,7 +11,7 @@
 > product; the BigQuery path is proven against an emulator, not a live
 > project.**
 
-db-drift migrates an on-prem PostgreSQL database to a cloud target. Version
+dbcarry migrates an on-prem PostgreSQL database to a cloud target. Version
 0.2.0 adds Google BigQuery as a target and makes **security parity** the
 distinguishing feature: the pipeline reads the roles, grants, column
 privileges, and row-level security policies that exist on the PostgreSQL
@@ -36,13 +36,13 @@ repeated wherever it matters in this README and in `docs/HANDOFF.md`.
 ```mermaid
 flowchart LR
   subgraph commands [Thin commands]
-    A[/db-drift:assess/] --> PB
-    P[/db-drift:plan/] --> PB
-    S[/db-drift:security/] --> PB
-    M[/db-drift:autopilot/] --> PB
+    A[/dbcarry:assess/] --> PB
+    P[/dbcarry:plan/] --> PB
+    S[/dbcarry:security/] --> PB
+    M[/dbcarry:autopilot/] --> PB
   end
   PB[pipeline-core playbooks, eight phases] --> SA[subagents: discovery, compatibility, security-analyst, sql-translator, migration-validator, security-validator]
-  PB --> SC[dbdrift.py scripts: inventory, security, bq-schema, bq-security, bq-load, bq-validate, dump, restore, checksum, replicate]
+  PB --> SC[dbcarry.py scripts: inventory, security, bq-schema, bq-security, bq-load, bq-validate, dump, restore, checksum, replicate]
   SC --> BE{Backend interface}
   BE --> EM[EmulatedBackend: JSON model on disk, the acceptance path]
   BE --> LV[LiveBackend: bq, gcloud, Data Catalog REST. NOT LIVE-TESTED]
@@ -60,7 +60,7 @@ finished migration) and calls a script when the work needs to be exact (a
 security inventory, a policy plan, a load, a read-back verification). The
 BigQuery scripts talk to a `Backend` interface with two implementations:
 `EmulatedBackend` keeps a JSON model and the loaded NDJSON under
-`~/.db-drift/bq-emulated/<migration>/` and enforces the structural rules the
+`~/.dbcarry/bq-emulated/<migration>/` and enforces the structural rules the
 pipeline relies on (a tagged column is readable only with the fine-grained
 reader role, a table with any row access policy denies principals no policy
 names); `LiveBackend` renders the same operations as `bq` and `gcloud`
@@ -97,22 +97,22 @@ of exposure, and the pipeline never opens that window; in live mode
 
 ```
 # install the plugin, then from your project directory:
-/db-drift:demo setup
-/db-drift:init demo-bq      # answer: provider bigquery, mode emulated, demo source defaults
-/db-drift:autopilot
+/dbcarry:demo setup
+/dbcarry:init demo-bq      # answer: provider bigquery, mode emulated, demo source defaults
+/dbcarry:autopilot
 ```
 
-`/db-drift:demo setup` seeds a local "on-prem" PostgreSQL 17 instance with
+`/dbcarry:demo setup` seeds a local "on-prem" PostgreSQL 17 instance with
 a 655,000-row retail schema (customers, products, orders, order_items,
 audit_log, a view, a materialized view) plus the planted security findings
 listed in `demo/scenario.md`: row-level security on `orders` and
 `audit_log`, a column-level grant that restricts `customers.email`, a role
 membership, a default-privileges rule, and a superuser owner.
-`/db-drift:init` writes the workspace. After assess writes
+`/dbcarry:init` writes the workspace. After assess writes
 `security/principal-map.yaml`, fill in one principal per role (any
 `group:` address works in emulated mode) before approving Gate 1; a role
 left empty is reported as unmapped and receives no bindings, which is the
-deny-by-default outcome, not an error. `/db-drift:autopilot` runs every
+deny-by-default outcome, not an error. `/dbcarry:autopilot` runs every
 phase in order, pausing only at the two gates.
 
 Acceptance run of the emulated demo through cutover (every number below is
@@ -146,7 +146,7 @@ Verification results (emulated):
   mutated copy and compared all 655,000 stored rows with the export row
   by row (0 differences).
 - `bq-security verify`: 23 checks passed, 0 failed, enforcement_active
-  true (taxonomy `dbdrift_bq-demo` activated for
+  true (taxonomy `dbcarry_bq-demo` activated for
   FINE_GRAINED_ACCESS_CONTROL).
 - `bq-security probes --run`: 18 of 18 probes passed (15 row_count, 2
   column_denied, 1 column_allowed, 0 unevaluable). reporting read 66,750
@@ -184,7 +184,7 @@ post-data restore the same diff reported match true in every section.
 ## Security parity
 
 The mapping is one pure function, `plan_security` in
-`scripts/db_drift/bq_security.py`, restated for humans in
+`scripts/db_carry/bq_security.py`, restated for humans in
 `docs/security-mapping.md` (with the demo as the running example) and in
 `skills/security-mapping/`. The compact version:
 
@@ -308,13 +308,13 @@ branches on which cloud it is talking to.
 ## Development
 
 ```
-db-drift/
+dbcarry/
 ├── .claude-plugin/plugin.json      plugin manifest (0.2.0)
 ├── .claude/settings.json           permission allowlist and the state-guard PreToolUse hook
 ├── hooks/hooks.json                the same hook, shipped with the plugin for installs elsewhere
 ├── CLAUDE.md                       project guidance when the repo is opened in Claude Code
 ├── CONTRIBUTING.md                 dev workflow, tests, adding providers and mapping rules
-├── commands/                       one thin router per verb; security.md routes /db-drift:security
+├── commands/                       one thin router per verb; security.md routes /dbcarry:security
 ├── agents/                         discovery-analyst, compatibility-checker, migration-validator,
 │                                   security-analyst, sql-translator, security-validator
 ├── skills/
@@ -323,8 +323,8 @@ db-drift/
 │   ├── provider-bigquery/          BigQuery contract, emulated and live modes
 │   ├── provider-local/             local demo stand-in provider
 │   └── provider-{gcp,aws,azure}/   cloud provider contracts (not live-tested)
-├── scripts/dbdrift.py              the CLI entrypoint
-├── scripts/db_drift/               state, config, pg, portable_pg, seed_demo, inventory,
+├── scripts/dbcarry.py              the CLI entrypoint
+├── scripts/db_carry/               state, config, pg, portable_pg, seed_demo, inventory,
 │                                   dump_restore, checksum, replicate (v0.1.0);
 │                                   security, bq_types, bq_predicate, bq_schema, bq_security,
 │                                   bq_backend, bq_load, bq_validate (v0.2.0)
@@ -336,7 +336,7 @@ db-drift/
                                     fixtures/demo-inventory.json, fixtures/demo-security.json
 ```
 
-CLI verbs, all `python scripts/dbdrift.py <verb> ...`: `state`, `pg`,
+CLI verbs, all `python scripts/dbcarry.py <verb> ...`: `state`, `pg`,
 `seed`, `inventory`, `dump`, `restore`, `objcount`, `checksum`, `replicate`
 from v0.1.0; `security` (`inventory`, `diff`, `sync-roles`), `bq-schema`
 (`translate`, `apply`, `verify`), `bq-security` (`plan`, `apply`, `verify`,

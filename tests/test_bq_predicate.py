@@ -1,6 +1,6 @@
 import pytest
 
-from db_drift import bq_predicate as bp
+from db_carry import bq_predicate as bp
 
 TABLES = {
     "orders": "`p.retail.orders`",

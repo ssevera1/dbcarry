@@ -63,7 +63,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from db_drift import bq_backend, bq_load, bq_types, config, pg
+from db_carry import bq_backend, bq_load, bq_types, config, pg
 
 NUMBER_TYPES = {"INT64", "NUMERIC", "BIGNUMERIC", "FLOAT64"}
 TEMPORAL_TYPES = {"DATE", "DATETIME", "TIMESTAMP"}
@@ -796,7 +796,7 @@ def _write_json(path, doc):
 
 def main(argv):
     bq_load.tolerant_console()
-    parser = argparse.ArgumentParser(prog="dbdrift.py bq-validate")
+    parser = argparse.ArgumentParser(prog="dbcarry.py bq-validate")
     parser.add_argument("--root", default=".",
                         help="project root holding migrations/")
     parser.add_argument("--migration", default=None)

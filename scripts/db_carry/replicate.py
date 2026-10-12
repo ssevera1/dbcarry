@@ -11,7 +11,7 @@ import json
 import sys
 import time
 
-from db_drift import pg
+from db_carry import pg
 
 READY_SQL = ("SELECT count(*) FILTER (WHERE srsubstate <> 'r'), count(*) "
              "FROM pg_subscription_rel")
@@ -69,7 +69,7 @@ def drop_publication(ci, name):
     pg.run_sql(ci, f'DROP PUBLICATION IF EXISTS "{name}"', writable=True)
     slots = pg.query_rows(
         ci, "SELECT slot_name FROM pg_replication_slots "
-            "WHERE NOT active AND slot_name LIKE 'dbdrift%'", readonly=True)
+            "WHERE NOT active AND slot_name LIKE 'dbcarry%'", readonly=True)
     for (slot,) in slots:
         pg.run_sql(ci, f"SELECT pg_drop_replication_slot('{slot}')", writable=True)
         print(f"dropped orphan slot {slot}")
@@ -78,29 +78,29 @@ def drop_publication(ci, name):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="dbdrift.py replicate")
+    parser = argparse.ArgumentParser(prog="dbcarry.py replicate")
     sub = parser.add_subparsers(dest="verb", required=True)
     p = sub.add_parser("create-publication")
     pg.add_conn_args(p)
-    p.add_argument("--name", default="dbdrift_pub")
+    p.add_argument("--name", default="dbcarry_pub")
     p = sub.add_parser("create-subscription")
     pg.add_conn_args(p)
     pg.add_conn_args(p, "source")
-    p.add_argument("--name", default="dbdrift_sub")
-    p.add_argument("--publication", default="dbdrift_pub")
+    p.add_argument("--name", default="dbcarry_sub")
+    p.add_argument("--publication", default="dbcarry_pub")
     p = sub.add_parser("status")
     pg.add_conn_args(p)
     p = sub.add_parser("wait-synced")
     pg.add_conn_args(p)
     pg.add_conn_args(p, "source")
-    p.add_argument("--slot", default="dbdrift_sub")
+    p.add_argument("--slot", default="dbcarry_sub")
     p.add_argument("--timeout", type=int, default=600)
     p = sub.add_parser("drop-subscription")
     pg.add_conn_args(p)
-    p.add_argument("--name", default="dbdrift_sub")
+    p.add_argument("--name", default="dbcarry_sub")
     p = sub.add_parser("drop-publication")
     pg.add_conn_args(p)
-    p.add_argument("--name", default="dbdrift_pub")
+    p.add_argument("--name", default="dbcarry_pub")
     args = parser.parse_args(argv[1:])
     ci = pg.conn_from_args(args)
     try:

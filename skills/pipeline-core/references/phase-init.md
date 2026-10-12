@@ -10,7 +10,7 @@ would come from `bq-security plan --template` in assess, after the
 workspace exists.
 
 1. If ./migrations/<name>/ already exists, stop and point the user at
-   /db-drift:status.
+   /dbcarry:status.
 2. Gather, via AskUserQuestion (one batch): engine (postgres; mysql is
    accepted but explain execution ships later), target provider (local,
    gcp, aws, azure, bigquery), downtime tolerance (low or flexible),
@@ -48,7 +48,7 @@ workspace exists.
 5. Write ./migrations/<name>/migration.yaml exactly in this shape:
 
    ```yaml
-   # db-drift migration config. Secrets live in env vars; only names here.
+   # dbcarry migration config. Secrets live in env vars; only names here.
    migration: demo-run
    engine: postgres
    provider: local
@@ -67,7 +67,7 @@ workspace exists.
 5. Write ./migrations/<name>/migration.yaml exactly in this shape:
 
    ```yaml
-   # db-drift migration config. Secrets live in env vars; only names here.
+   # dbcarry migration config. Secrets live in env vars; only names here.
    migration: demo-run
    engine: postgres
    provider: bigquery
@@ -107,6 +107,6 @@ workspace exists.
    On failure: report the error, suggest fixes (is the instance running,
    is the env var exported), and leave state as initialized; init is
    still successful, assess will retest.
-7. Tell the user the workspace path and that /db-drift:assess is next.
+7. Tell the user the workspace path and that /dbcarry:assess is next.
    For bigquery, add that assess writes security/principal-map.yaml and
-   that it must be filled in before /db-drift:plan reaches Gate 1.
+   that it must be filled in before /dbcarry:plan reaches Gate 1.
